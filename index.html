@@ -174,6 +174,11 @@ function parseASM(src) {
       else       pendingLabel = lbl;
       continue;
     }
+    // Data section: handle labels WITHOUT colon (NASM allows: NAME dq value)
+    if (section==='data') {
+      const noColon = line.match(/^(\w+)\s+(db|dw|dd|dq)\s+(.+)$/i);
+      if (noColon) { dataVars[noColon[1]] = parseDataDef(noColon[2].toLowerCase(), noColon[3].trim()); continue; }
+    }
     if (section==='text') { instructions.push(parseLine(line, pendingLabel)); pendingLabel=null; }
   }
   return { dataVars, instructions };
@@ -331,7 +336,19 @@ function structureRange(blocks,start,end,blockMap,dataVars,vmap,indent,inLoop) {
         const tIdx=target.index, ftIdx=i+1;
         const res=emitBlockInstrs(block,dataVars,vmap,indent,true,blockMap,end,inLoop);
         cmpSt=res.cmpSt||cmpSt; lines.push(...res.lines);
-        const cond=buildCond(block.jumpOp,res.cmpSt||cmpSt,vmap);
+        const activeCmp=res.cmpSt||cmpSt;
+
+        // Join-point detection: if the fallthrough range [ftIdx,tIdx) ends by
+        // flowing into tIdx, then tIdx is a join point (not a "then" body).
+        // Emit: if (INVERTED) { else-body } then continue from tIdx.
+        if(elseFlowsToThen(blocks,ftIdx,tIdx,blockMap)) {
+          const invCond=invertCond(block.jumpOp,activeCmp,vmap);
+          const elseL=structureRange(blocks,ftIdx,tIdx,blockMap,dataVars,vmap,indent+1,inLoop);
+          if(elseL.length){ lines.push(`${pad}if (${invCond}) {`); lines.push(...elseL); lines.push(`${pad}}`); }
+          i=tIdx; continue;
+        }
+
+        const cond=buildCond(block.jumpOp,activeCmp,vmap);
         const thenL=structureRange(blocks,tIdx,end,blockMap,dataVars,vmap,indent+1,inLoop);
         const elseL=structureRange(blocks,ftIdx,tIdx,blockMap,dataVars,vmap,indent+1,inLoop);
         lines.push(`${pad}if (${cond}) {`); lines.push(...thenL);
@@ -357,6 +374,22 @@ function structureRange(blocks,start,end,blockMap,dataVars,vmap,indent,inLoop) {
   }
   return lines;
 }
+
+// True when the else-range [ftIdx,tIdx) eventually falls into blocks[tIdx]
+// (meaning tIdx is a join/merge point, not a "then" body)
+function elseFlowsToThen(blocks,ftIdx,tIdx,blockMap) {
+  if(ftIdx>=tIdx||!blocks[tIdx]) return false;
+  const thenId=blocks[tIdx].id;
+  // Walk from ftIdx: if any block in [ftIdx,tIdx) has thenId as successor, it's a join
+  for(let k=ftIdx;k<tIdx;k++){
+    if((blocks[k].succs||[]).includes(thenId)) return true;
+  }
+  return false;
+}
+
+const INVERT_JUMP={jg:'jle',jl:'jge',je:'jne',jne:'je',jge:'jl',jle:'jg',
+                   ja:'jbe',jb:'jae',jae:'jb',jbe:'ja',jz:'jnz',jnz:'jz',js:'jns',jns:'js'};
+function invertCond(jumpOp,cmpSt,vmap){ return buildCond(INVERT_JUMP[jumpOp]||jumpOp,cmpSt,vmap); }
 
 // Find last block in [start,end) that has any successor pointing back to headerId
 function findBackEdgeSrc(hid,blocks,start,end,blockMap) {
@@ -432,6 +465,7 @@ function instrToC(instr,dataVars,vmap) {
       return {line:`${dst} ^= ${src};`,cmpSt};
     case 'shl': case 'sal': return {line:`${dst} <<= ${src};`,cmpSt};
     case 'shr': case 'sar': return {line:`${dst} >>= ${src};`,cmpSt};
+    case 'xchg': return {line:`{ long _tmp = ${dst}; ${dst} = ${src}; ${src} = _tmp; }`,cmpSt};
     case 'cmp':  cmpSt={left:dst,right:src}; return {line:null,cmpSt};
     case 'test': cmpSt={left:dst,right:src}; return {line:null,cmpSt};
     case 'ret':  return {line:`return ${vmr('rax',vmap)};`,cmpSt};
