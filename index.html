@@ -216,13 +216,13 @@ function splitArgs(s) {
 
 // ─── Block builder ────────────────────────────────────────────────────────────
 function buildBlocks(instructions) {
-  const blocks=[]; let cur=null;
-  const flush=()=>{ if(cur){blocks.push(cur);cur=null;} };
+  const rawBlocks=[]; let cur=null;
+  const flush=()=>{ if(cur){rawBlocks.push(cur);cur=null;} };
 
   for (const instr of instructions) {
     if (!cur||instr.label) {
       flush();
-      cur={id:instr.label||`_b${blocks.length}`,index:0,instrs:[],jumpOp:null,jumpTarget:null,isRet:false};
+      cur={id:instr.label||`_b${rawBlocks.length}`,index:0,instrs:[],jumpOp:null,jumpTarget:null,isRet:false,succs:[]};
     }
     cur.instrs.push(instr);
     if (COND_JUMPS.has(instr.op))  { cur.jumpOp=instr.op; cur.jumpTarget=instr.args[0]; flush(); }
@@ -230,50 +230,110 @@ function buildBlocks(instructions) {
     else if (instr.op==='ret')     { cur.isRet=true; flush(); }
   }
   flush();
-  blocks.forEach((b,i)=>b.index=i);
+  rawBlocks.forEach((b,i)=>b.index=i);
   const blockMap={};
-  blocks.forEach(b=>blockMap[b.id]=b);
+  rawBlocks.forEach(b=>blockMap[b.id]=b);
 
-  for (let i=0;i<blocks.length;i++) {
-    const b=blocks[i]; b.succs=[];
+  // Compute succs before reordering (based on original order for fallthrough)
+  for (let i=0;i<rawBlocks.length;i++) {
+    const b=rawBlocks[i]; b.succs=[];
     if(b.isRet) continue;
     if(b.jumpOp==='jmp') { const t=blockMap[b.jumpTarget]; if(t) b.succs.push(t.id); }
     else if(COND_JUMPS.has(b.jumpOp)) {
       const t=blockMap[b.jumpTarget]; if(t) b.succs.push(t.id);
-      if(blocks[i+1]) b.succs.push(blocks[i+1].id);
-    } else { if(blocks[i+1]) b.succs.push(blocks[i+1].id); }
+      if(rawBlocks[i+1]) b.succs.push(rawBlocks[i+1].id);
+    } else { if(rawBlocks[i+1]) b.succs.push(rawBlocks[i+1].id); }
   }
+
+  // DFS reorder: gives proper back-edge orientation for structurer
+  const blocks = reorderBlocksDFS(rawBlocks[0], rawBlocks, blockMap);
   return {blocks,blockMap};
 }
 
+// DFS traversal from entry — visit fallthrough before taken so natural
+// execution order comes first; this makes back-edges point backwards (source > target)
+function reorderBlocksDFS(entry, allBlocks, blockMap) {
+  const ordered=[], visited=new Set();
+  function dfs(id) {
+    if(!id||visited.has(id)) return;
+    const b=blockMap[id]; if(!b) return;
+    visited.add(id); ordered.push(b);
+    // For conditional jumps succs=[taken, fallthrough]; visit fallthrough first
+    const succs=b.succs.slice();
+    if(succs.length>=2) succs.reverse();
+    for(const sid of succs) dfs(sid);
+  }
+  dfs(entry.id);
+  for(const b of allBlocks) if(!visited.has(b.id)){visited.add(b.id);ordered.push(b);}
+  ordered.forEach((b,i)=>b.index=i);
+  return ordered;
+}
+
+// Detect Linux ABI input params: which of rdi/rsi/rdx/rcx/r8/r9 appear in the function
+const ABI_PARAMS=['rdi','rsi','rdx','rcx','r8','r9'];
+function detectParams(blocks) {
+  const used=new Set();
+  for(const b of blocks) for(const ins of b.instrs)
+    for(const a of ins.args||[]) {
+      const lo=normReg(a.toLowerCase().replace(/^(qword|dword|word|byte)\s*(ptr\s*)?\[|\]$/gi,'').trim());
+      if(ABI_PARAMS.includes(lo)) used.add(lo);
+    }
+  return ABI_PARAMS.filter(r=>used.has(r));
+}
+
 // ─── Structurer ───────────────────────────────────────────────────────────────
-function structureRange(blocks,start,end,blockMap,dataVars,vmap,indent) {
+// inLoop: true when we're inside a loop body (enables break emission)
+function structureRange(blocks,start,end,blockMap,dataVars,vmap,indent,inLoop) {
   const lines=[]; const pad='    '.repeat(indent);
   let cmpSt=null; let i=start;
   while(i<end) {
     const block=blocks[i];
+
+    // ── Loop detection: find last block that jumps back to blocks[i] ──
     const backIdx=findBackEdgeSrc(block.id,blocks,i,end,blockMap);
     if(backIdx!==-1) {
       const loopEnd=blocks[backIdx];
+      const isInfinite=(loopEnd.jumpOp==='jmp'); // unconditional back → while(1)
       const bodyLines=[]; let ic=null;
       for(let j=i;j<=backIdx;j++){
-        const r=emitBlockInstrs(blocks[j],dataVars,vmap,indent+1,j===backIdx);
+        // skip the last back-jump; pass inLoop=true so breaks work inside
+        const r=emitBlockInstrs(blocks[j],dataVars,vmap,indent+1,j===backIdx,blockMap,end,true);
         ic=r.cmpSt||ic; bodyLines.push(...r.lines);
       }
-      const cond=buildCond(loopEnd.jumpOp,ic,vmap);
-      lines.push(`${pad}do {`); lines.push(...bodyLines); lines.push(`${pad}} while (${cond});`);
+      if(isInfinite){
+        lines.push(`${pad}while (1) {`);
+        lines.push(...bodyLines);
+        lines.push(`${pad}}`);
+      } else {
+        const cond=buildCond(loopEnd.jumpOp,ic,vmap);
+        lines.push(`${pad}do {`); lines.push(...bodyLines);
+        lines.push(`${pad}} while (${cond});`);
+      }
       i=backIdx+1; continue;
     }
 
+    // ── Conditional jump outside current range → break (only inside loop) ──
+    if(COND_JUMPS.has(block.jumpOp) && inLoop) {
+      const target=blockMap[block.jumpTarget];
+      if(target && (target.index>=end || target.index<start)) {
+        const res=emitBlockInstrs(block,dataVars,vmap,indent,true,blockMap,end,inLoop);
+        cmpSt=res.cmpSt||cmpSt; lines.push(...res.lines);
+        const cond=buildCond(block.jumpOp,res.cmpSt||cmpSt,vmap);
+        lines.push(`${pad}if (${cond}) break;`);
+        i++; continue;
+      }
+    }
+
+    // ── Forward conditional jump → if / else ──────────────────────────
     if(COND_JUMPS.has(block.jumpOp)) {
       const target=blockMap[block.jumpTarget];
       if(target&&target.index>block.index&&target.index<=end) {
         const tIdx=target.index, ftIdx=i+1;
-        const res=emitBlockInstrs(block,dataVars,vmap,indent,true);
+        const res=emitBlockInstrs(block,dataVars,vmap,indent,true,blockMap,end,inLoop);
         cmpSt=res.cmpSt||cmpSt; lines.push(...res.lines);
         const cond=buildCond(block.jumpOp,res.cmpSt||cmpSt,vmap);
-        const thenL=structureRange(blocks,tIdx,end,blockMap,dataVars,vmap,indent+1);
-        const elseL=structureRange(blocks,ftIdx,tIdx,blockMap,dataVars,vmap,indent+1);
+        const thenL=structureRange(blocks,tIdx,end,blockMap,dataVars,vmap,indent+1,inLoop);
+        const elseL=structureRange(blocks,ftIdx,tIdx,blockMap,dataVars,vmap,indent+1,inLoop);
         lines.push(`${pad}if (${cond}) {`); lines.push(...thenL);
         if(elseL.length){lines.push(`${pad}} else {`); lines.push(...elseL);}
         lines.push(`${pad}}`);
@@ -281,29 +341,33 @@ function structureRange(blocks,start,end,blockMap,dataVars,vmap,indent) {
       }
     }
 
+    // ── Unconditional forward jump → skip to target ───────────────────
     if(block.jumpOp==='jmp') {
       const target=blockMap[block.jumpTarget];
-      if(target&&target.index>block.index){
-        const res=emitBlockInstrs(block,dataVars,vmap,indent,true);
+      if(target&&target.index>block.index&&target.index<=end) {
+        const res=emitBlockInstrs(block,dataVars,vmap,indent,true,blockMap,end,inLoop);
         cmpSt=res.cmpSt||cmpSt; lines.push(...res.lines);
         i=target.index; continue;
       }
     }
 
-    const res=emitBlockInstrs(block,dataVars,vmap,indent,false);
+    // ── Regular block ─────────────────────────────────────────────────
+    const res=emitBlockInstrs(block,dataVars,vmap,indent,false,blockMap,end,inLoop);
     cmpSt=res.cmpSt||cmpSt; lines.push(...res.lines); i++;
   }
   return lines;
 }
 
+// Find last block in [start,end) that has any successor pointing back to headerId
 function findBackEdgeSrc(hid,blocks,start,end,blockMap) {
+  let last=-1;
   for(let i=start;i<end;i++){
     const b=blocks[i];
-    if(COND_JUMPS.has(b.jumpOp)&&b.jumpTarget===hid){
-      const t=blockMap[b.jumpTarget]; if(t&&t.index<=i) return i;
+    for(const sid of (b.succs||[])){
+      if(sid===hid){ const t=blockMap[sid]; if(t&&t.index<=i) last=i; }
     }
   }
-  return -1;
+  return last;
 }
 
 function buildCond(op,cmpSt,vmap) {
@@ -317,13 +381,17 @@ function buildCond(op,cmpSt,vmap) {
 }
 
 // ─── Instruction → C line ─────────────────────────────────────────────────────
-function emitBlockInstrs(block,dataVars,vmap,indent,skipLastJump) {
+// blockMap/rangeEnd/inLoop used to detect "jump outside range = break" on last instr
+function emitBlockInstrs(block,dataVars,vmap,indent,skipLastJump,blockMap,rangeEnd,inLoop) {
   const pad='    '.repeat(indent); const lines=[]; let cmpSt=null;
   const instrs=block.instrs; const last=instrs.length-1;
   for(let i=0;i<instrs.length;i++){
     const instr=instrs[i]; const isLast=i===last;
+    // skip function prologue/epilogue
     if(instr.op==='push'&&instr.args[0]?.toLowerCase()==='rbp') continue;
     if(instr.op==='pop' &&instr.args[0]?.toLowerCase()==='rbp') continue;
+    if(instr.op==='push'&&/^r(1[2-5]|bx)$/.test(instr.args[0]?.toLowerCase())) continue;
+    if(instr.op==='pop' &&/^r(1[2-5]|bx)$/.test(instr.args[0]?.toLowerCase())) continue;
     if(instr.op==='mov' &&instr.args[0]?.toLowerCase()==='rbp'&&instr.args[1]?.toLowerCase()==='rsp') continue;
     if(instr.op==='leave') continue;
     if(isLast&&skipLastJump&&(COND_JUMPS.has(instr.op)||instr.op==='jmp')) continue;
@@ -417,15 +485,27 @@ function collectRegs(blocks) {
 // ─── C emitter (top-level) ────────────────────────────────────────────────────
 function emitC(dataVars,blocks,blockMap,vmap) {
   const out=[];
+
+  // Global data vars
   for(const [name,info] of Object.entries(dataVars)){
     const n=vmr(name,vmap);
     out.push(info.kind==='str'?`const char* ${n} = "${info.strVal}";`:`${info.type==='dq'?'long':'int'} ${n} = ${info.rawVal};`);
   }
   if(out.length) out.push('');
-  const mainBlock=blockMap['main']||blocks[0];
-  if(!mainBlock) return '// Nicio funcție găsită';
-  out.push('int main() {');
-  out.push(...structureRange(blocks,mainBlock.index,blocks.length,blockMap,dataVars,vmap,1));
+
+  // Detect entry block (first block with a real label = function name)
+  const entryBlock = blocks[0];
+  if(!entryBlock) return '// Nicio funcție găsită';
+
+  const fnName = entryBlock.id && !entryBlock.id.startsWith('_b') ? entryBlock.id : 'func';
+
+  // Detect used ABI parameter registers → emit as parameters
+  const paramRegs = detectParams(blocks);
+  const params = paramRegs.map(r=>`long ${vmr(r,vmap)}`).join(', ');
+  const retType = fnName==='main' ? 'int' : 'void';
+  out.push(`${retType} ${vmr(fnName,vmap)}(${params}) {`);
+
+  out.push(...structureRange(blocks,entryBlock.index,blocks.length,blockMap,dataVars,vmap,1,false));
   out.push('}');
   return out.join('\n');
 }
