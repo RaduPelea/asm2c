@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ASM → C Decompiler</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Consolas', 'Monaco', monospace; background: #1e1e1e; color: #d4d4d4; min-height: 100vh; }
+.container { max-width: 1300px; margin: 0 auto; padding: 20px; }
+h1 { color: #569cd6; margin-bottom: 6px; font-size: 1.4rem; letter-spacing: 0.5px; }
+.subtitle { color: #6a9955; font-size: 0.8rem; margin-bottom: 20px; }
+.panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 12px; }
+.panel-label { color: #9cdcfe; margin-bottom: 6px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; }
+textarea {
+  width: 100%; height: 420px; background: #252526; border: 1px solid #3c3c3c;
+  color: #d4d4d4; padding: 12px; font-family: inherit; font-size: 0.82rem;
+  resize: vertical; border-radius: 4px; outline: none; line-height: 1.5;
+}
+textarea:focus { border-color: #569cd6; }
+.output-box {
+  width: 100%; height: 420px; background: #252526; border: 1px solid #3c3c3c;
+  padding: 12px; font-size: 0.82rem; border-radius: 4px; overflow-y: auto;
+  white-space: pre; line-height: 1.5;
+}
+.btn-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+button {
+  background: #0e639c; color: #fff; border: none; padding: 8px 22px;
+  cursor: pointer; border-radius: 4px; font-family: inherit; font-size: 0.88rem;
+}
+button:hover { background: #1177bb; }
+button.secondary { background: #3c3c3c; }
+button.secondary:hover { background: #505050; }
+.error { color: #f48771; font-size: 0.82rem; }
+.rename-section {
+  background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 16px;
+  margin-top: 8px;
+}
+.rename-section h2 { color: #9cdcfe; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+.rename-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.rename-item { display: flex; align-items: center; gap: 6px; background: #2d2d2d; padding: 5px 10px; border-radius: 4px; }
+.rename-orig { color: #ce9178; font-size: 0.82rem; min-width: 60px; }
+.rename-arrow { color: #555; font-size: 0.75rem; }
+.rename-input {
+  background: #1e1e1e; border: 1px solid #555; color: #d4d4d4;
+  padding: 3px 7px; border-radius: 3px; font-family: inherit; font-size: 0.82rem; width: 110px;
+}
+.rename-input:focus { outline: none; border-color: #569cd6; }
+.rename-badge { font-size: 0.65rem; color: #6a9955; background: #1e3a1e; padding: 1px 5px; border-radius: 3px; }
+/* Syntax highlight classes */
+.kw  { color: #569cd6; }
+.ty  { color: #4ec9b0; }
+.str { color: #ce9178; }
+.num { color: #b5cea8; }
+.cmt { color: #6a9955; }
+.fn  { color: #dcdcaa; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>ASM → C Decompiler</h1>
+  <p class="subtitle">NASM x86-64 · fără goto · fără LLM</p>
+
+  <div class="panels">
+    <div>
+      <div class="panel-label">Assembly Input</div>
+      <textarea id="asmInput" spellcheck="false" placeholder="; Paste NASM x86-64 assembly here..."></textarea>
+    </div>
+    <div>
+      <div class="panel-label">C Output</div>
+      <div class="output-box" id="cOutput"><span class="cmt">// Output-ul C va apărea aici</span></div>
+    </div>
+  </div>
+
+  <div class="btn-row">
+    <button onclick="runDecompile()">Decompilează →</button>
+    <button class="secondary" onclick="copyOutput()">Copiază C</button>
+    <span class="error" id="errMsg"></span>
+  </div>
+
+  <div class="rename-section">
+    <h2>Redenumire variabile &amp; registre</h2>
+    <div class="rename-grid" id="renameGrid">
+      <span style="color:#555;font-size:0.82rem">Decompilează mai întâi pentru a vedea variabilele detectate.</span>
+    </div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+//  GLOBALS
+// ══════════════════════════════════════════════════════════════
+let varMap = {};        // reg/dataVar → user name
+let lastParsed = null;  // { dataVars, blocks, blockMap }
+
+const REGS64 = ['rax','rbx','rcx','rdx','rsi','rdi','r8','r9','r10','r11','r12','r13','r14','r15'];
+const REG32TO64 = {eax:'rax',ebx:'rbx',ecx:'rcx',edx:'rdx',esi:'rsi',edi:'rdi',
+  r8d:'r8',r9d:'r9',r10d:'r10',r11d:'r11',r12d:'r12',r13d:'r13',r14d:'r14',r15d:'r15'};
+const ALL_REGS = [...REGS64, ...Object.keys(REG32TO64)];
+const COND_JUMPS = new Set(['je','jne','jg','jl','jge','jle','ja','jb','jae','jbe','jz','jnz','js','jns']);
+const UNCOND_JUMP = 'jmp';
+
+function normReg(r) { return REG32TO64[r] || r; }
+function isReg(s) { return ALL_REGS.includes(s.toLowerCase()); }
+
+// ══════════════════════════════════════════════════════════════
+//  PARSER
+// ══════════════════════════════════════════════════════════════
+function parseASM(src) {
+  const dataVars = {};   // name → { type, rawVal, strVal }
+  const instructions = []; // { label, op, args }
+
+  let section = '';
+  let pendingLabel = null;
+
+  for (let raw of src.split('\n')) {
+    // Strip inline comments (but not inside backtick strings)
+    let line = stripComment(raw).trim();
+    if (!line) continue;
+
+    // Preprocessor / directives
+    if (/^%/.test(line) || /^(global|extern)\b/i.test(line)) continue;
+    if (/^section\s+\.data/i.test(line)) { section = 'data'; continue; }
+    if (/^section\s+\.text/i.test(line)) { section = 'text'; continue; }
+    if (/^section\s+\.bss/i.test(line))  { section = 'bss';  continue; }
+
+    // Label at start of line
+    const labelMatch = line.match(/^(\w+):\s*(.*)?$/);
+    if (labelMatch) {
+      const lbl = labelMatch[1];
+      const rest = (labelMatch[2] || '').trim();
+
+      if (section === 'data') {
+        const dm = rest.match(/^(db|dw|dd|dq)\s+(.+)$/i);
+        if (dm) {
+          dataVars[lbl] = parseDataDef(dm[1].toLowerCase(), dm[2].trim());
+        }
+        pendingLabel = null;
+        continue;
+      }
+
+      // text section
+      if (rest) {
+        instructions.push(parseLine(rest, lbl));
+        pendingLabel = null;
+      } else {
+        pendingLabel = lbl;
+      }
+      continue;
+    }
+
+    if (section === 'text') {
+      instructions.push(parseLine(line, pendingLabel));
+      pendingLabel = null;
+    }
+  }
+
+  return { dataVars, instructions };
+}
+
+function stripComment(line) {
+  // Preserve backtick strings, strip ; comments outside them
+  let inBt = false;
+  for (let i = 0; i < line.length; i++) {
+    if (line[i] === '`') inBt = !inBt;
+    if (!inBt && line[i] === ';') return line.slice(0, i);
+  }
+  return line;
+}
+
+function parseDataDef(type, val) {
+  // Backtick or quoted string
+  const btMatch = val.match(/^`([^`]*)`/);
+  if (btMatch) return { type, kind: 'str', strVal: unescapeStr(btMatch[1]) };
+  const qMatch = val.match(/^"([^"]*)"/);
+  if (qMatch) return { type, kind: 'str', strVal: qMatch[1] };
+  const sqMatch = val.match(/^'([^']*)'/);
+  if (sqMatch) return { type, kind: 'str', strVal: sqMatch[1] };
+  // Number
+  return { type, kind: 'num', rawVal: val.split(',')[0].trim() };
+}
+
+function unescapeStr(s) {
+  return s.replace(/\\n/g, '\\n').replace(/\\t/g, '\\t').replace(/\\x00?/g, '').replace(/,\s*0$/,'');
+}
+
+function parseLine(line, label) {
+  // PRINTF64 macro (backtick format string)
+  const p64 = line.match(/^PRINTF64\s+`([^`]*)`,?\s*(.*)?$/i);
+  if (p64) {
+    const fmt = p64[1];
+    const rest = (p64[2] || '').trim();
+    const args = rest ? splitArgs(rest) : [];
+    return { label, op: 'PRINTF64', args: [fmt, ...args] };
+  }
+
+  const spaceIdx = line.search(/\s/);
+  if (spaceIdx === -1) return { label, op: line.toLowerCase(), args: [] };
+  const op = line.slice(0, spaceIdx).toLowerCase();
+  const argStr = line.slice(spaceIdx).trim();
+  return { label, op, args: splitArgs(argStr) };
+}
+
+function splitArgs(s) {
+  const res = [];
+  let depth = 0, cur = '';
+  for (const ch of s) {
+    if (ch === '[') depth++;
+    else if (ch === ']') depth--;
+    if (ch === ',' && depth === 0) { res.push(cur.trim()); cur = ''; }
+    else cur += ch;
+  }
+  if (cur.trim()) res.push(cur.trim());
+  return res;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  BASIC BLOCK BUILDER
+// ══════════════════════════════════════════════════════════════
+function buildBlocks(instructions) {
+  const blocks = [];
+  let cur = null;
+
+  function flush() { if (cur) { blocks.push(cur); cur = null; } }
+
+  for (const instr of instructions) {
+    if (!cur || instr.label) {
+      flush();
+      cur = {
+        id: instr.label || `_b${blocks.length}`,
+        index: blocks.length,   // will fix after
+        instrs: [],
+        jumpOp: null,
+        jumpTarget: null,
+        isRet: false,
+      };
+    }
+    cur.instrs.push(instr);
+
+    if (COND_JUMPS.has(instr.op)) {
+      cur.jumpOp = instr.op;
+      cur.jumpTarget = instr.args[0];
+      flush();
+    } else if (instr.op === UNCOND_JUMP) {
+      cur.jumpOp = UNCOND_JUMP;
+      cur.jumpTarget = instr.args[0];
+      flush();
+    } else if (instr.op === 'ret') {
+      cur.isRet = true;
+      flush();
+    }
+  }
+  flush();
+
+  // Fix indices
+  blocks.forEach((b, i) => b.index = i);
+
+  // Build blockMap
+  const blockMap = {};
+  blocks.forEach(b => { blockMap[b.id] = b; });
+
+  // Compute successors
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
+    b.succs = [];
+    if (b.isRet) continue;
+
+    if (b.jumpOp === UNCOND_JUMP) {
+      const t = blockMap[b.jumpTarget];
+      if (t) b.succs.push(t.id);
+    } else if (COND_JUMPS.has(b.jumpOp)) {
+      const t = blockMap[b.jumpTarget];
+      if (t) b.succs.push(t.id);              // taken (then)
+      if (blocks[i + 1]) b.succs.push(blocks[i + 1].id); // fallthrough (else)
+    } else {
+      if (blocks[i + 1]) b.succs.push(blocks[i + 1].id);
+    }
+  }
+
+  return { blocks, blockMap };
+}
+
+// ══════════════════════════════════════════════════════════════
+//  STRUCTURER  (linear scan, pattern-based)
+// ══════════════════════════════════════════════════════════════
+
+// Returns array of C-line strings
+function structureRange(blocks, start, end, blockMap, dataVars, varMap, indent) {
+  const lines = [];
+  const pad = '    '.repeat(indent);
+  let cmpSt = null; // { left, right } — last seen cmp/test
+  let i = start;
+
+  while (i < end) {
+    const block = blocks[i];
+
+    // ── Detect back edge → do-while ──────────────────────────
+    // A block in [i, end) that has a conditional jump back to blocks[i]
+    const backSrcIdx = findBackEdgeSrc(block.id, blocks, i, end, blockMap);
+    if (backSrcIdx !== -1) {
+      const loopEnd = blocks[backSrcIdx];
+      // Emit loop body (blocks i..backSrcIdx), last block skips its jump
+      const bodyLines = [];
+      let innerCmp = null;
+      for (let j = i; j <= backSrcIdx; j++) {
+        const skipJump = (j === backSrcIdx);
+        const res = emitBlockInstrs(blocks[j], dataVars, varMap, indent + 1, skipJump);
+        innerCmp = res.cmpSt || innerCmp;
+        bodyLines.push(...res.lines);
+      }
+      const cond = buildCond(loopEnd.jumpOp, innerCmp, varMap);
+      lines.push(`${pad}do {`);
+      lines.push(...bodyLines);
+      lines.push(`${pad}} while (${cond});`);
+      i = backSrcIdx + 1;
+      continue;
+    }
+
+    // ── Detect forward conditional jump → if / else ──────────
+    if (COND_JUMPS.has(block.jumpOp)) {
+      const target = blockMap[block.jumpTarget];
+      if (target && target.index > block.index && target.index <= end) {
+        const tIdx = target.index;
+        const ftIdx = i + 1; // fallthrough index
+
+        // Emit this block's instructions (skip last jump)
+        const res = emitBlockInstrs(block, dataVars, varMap, indent, true);
+        cmpSt = res.cmpSt || cmpSt;
+        lines.push(...res.lines);
+
+        const cond = buildCond(block.jumpOp, res.cmpSt || cmpSt, varMap);
+
+        // then-branch  = blocks [tIdx, end)
+        // else-branch  = blocks [ftIdx, tIdx)
+        const thenLines = structureRange(blocks, tIdx, end, blockMap, dataVars, varMap, indent + 1);
+        const elseLines = structureRange(blocks, ftIdx, tIdx, blockMap, dataVars, varMap, indent + 1);
+
+        lines.push(`${pad}if (${cond}) {`);
+        lines.push(...thenLines);
+        if (elseLines.length > 0) {
+          lines.push(`${pad}} else {`);
+          lines.push(...elseLines);
+        }
+        lines.push(`${pad}}`);
+
+        i = end; // consumed all
+        continue;
+      }
+    }
+
+    // ── Unconditional forward jump: skip to target ────────────
+    if (block.jumpOp === UNCOND_JUMP) {
+      const target = blockMap[block.jumpTarget];
+      if (target && target.index > block.index) {
+        // Emit non-jump instrs, then continue from target
+        const res = emitBlockInstrs(block, dataVars, varMap, indent, true);
+        cmpSt = res.cmpSt || cmpSt;
+        lines.push(...res.lines);
+        i = target.index;
+        continue;
+      }
+    }
+
+    // ── Regular block ─────────────────────────────────────────
+    const res = emitBlockInstrs(block, dataVars, varMap, indent, false);
+    cmpSt = res.cmpSt || cmpSt;
+    lines.push(...res.lines);
+    i++;
+  }
+
+  return lines;
+}
+
+function findBackEdgeSrc(headerId, blocks, start, end, blockMap) {
+  // Return index of a block in [start, end) that jumps back to blocks[start]
+  for (let i = start; i < end; i++) {
+    const b = blocks[i];
+    if (COND_JUMPS.has(b.jumpOp) && b.jumpTarget === headerId) {
+      const target = blockMap[b.jumpTarget];
+      if (target && target.index <= i) return i;
+    }
+  }
+  return -1;
+}
+
+function buildCond(jumpOp, cmpSt, varMap) {
+  if (!cmpSt) return '/* cond */';
+  const L = vm(cmpSt.left, varMap);
+  const R = vm(cmpSt.right, varMap);
+  const map = {
+    jg: `${L} > ${R}`, jl: `${L} < ${R}`,
+    jge: `${L} >= ${R}`, jle: `${L} <= ${R}`,
+    je: `${L} == ${R}`, jne: `${L} != ${R}`,
+    jz: `${L} == 0`, jnz: `${L} != 0`,
+    ja: `${L} > ${R}`, jb: `${L} < ${R}`,
+    jae: `${L} >= ${R}`, jbe: `${L} <= ${R}`,
+    js: `${L} < 0`, jns: `${L} >= 0`,
+  };
+  return map[jumpOp] || `${jumpOp}(${L}, ${R})`;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  INSTRUCTION EMITTER
+// ══════════════════════════════════════════════════════════════
+// Returns { lines: string[], cmpSt: {left,right}|null }
+function emitBlockInstrs(block, dataVars, varMap, indent, skipLastJump) {
+  const pad = '    '.repeat(indent);
+  const lines = [];
+  let cmpSt = null;
+  const instrs = block.instrs;
+  const last = instrs.length - 1;
+
+  for (let i = 0; i < instrs.length; i++) {
+    const instr = instrs[i];
+    const isLast = i === last;
+
+    // Skip prologue
+    if (instr.op === 'push' && instr.args[0]?.toLowerCase() === 'rbp') continue;
+    if (instr.op === 'pop'  && instr.args[0]?.toLowerCase() === 'rbp') continue;
+    if (instr.op === 'mov'  && instr.args[0]?.toLowerCase() === 'rbp' && instr.args[1]?.toLowerCase() === 'rsp') continue;
+    if (instr.op === 'leave') continue;
+
+    // Skip last jump if requested
+    if (isLast && skipLastJump && (COND_JUMPS.has(instr.op) || instr.op === UNCOND_JUMP)) continue;
+
+    const result = instrToC(instr, dataVars, varMap);
+    if (result.cmpSt) cmpSt = result.cmpSt;
+    if (result.line !== null) lines.push(`${pad}${result.line}`);
+  }
+
+  return { lines, cmpSt };
+}
+
+// Returns { line: string|null, cmpSt: obj|null }
+function instrToC(instr, dataVars, varMap) {
+  const { op, args } = instr;
+  let cmpSt = null;
+
+  const dst = args[0] ? resolveArg(args[0], dataVars, varMap) : null;
+  const src = args[1] ? resolveArg(args[1], dataVars, varMap) : null;
+
+  if (op === 'PRINTF64') {
+    // args[0] = raw format string (from backticks)
+    let fmt = args[0]
+      .replace(/\\n/g, '\\n')
+      .replace(/\\x00?/g, '')
+      .replace(/\\0/g, '');
+    const pargs = args.slice(1).map(a => resolveArg(a, dataVars, varMap));
+    const call = pargs.length
+      ? `printf("${fmt}", ${pargs.join(', ')});`
+      : `printf("${fmt}");`;
+    return { line: call, cmpSt };
+  }
+
+  switch (op) {
+    case 'mov':
+      if (!dst || !src) return { line: null, cmpSt };
+      return { line: `${dst} = ${src};`, cmpSt };
+
+    case 'lea':
+      if (!dst || !src) return { line: null, cmpSt };
+      return { line: `${dst} = &${src};`, cmpSt };
+
+    case 'add': return { line: `${dst} += ${src};`, cmpSt };
+    case 'sub': return { line: `${dst} -= ${src};`, cmpSt };
+    case 'imul':
+      if (args.length === 3) {
+        const s2 = resolveArg(args[2], dataVars, varMap);
+        return { line: `${dst} = ${src} * ${s2};`, cmpSt };
+      }
+      return { line: `${dst} *= ${src};`, cmpSt };
+    case 'mul':  return { line: `rax *= ${dst};`, cmpSt };
+    case 'idiv': return { line: `rax = rax / ${dst}; rdx = rax % ${dst};`, cmpSt };
+    case 'div':  return { line: `rax = rax / ${dst}; rdx = rax % ${dst};`, cmpSt };
+    case 'inc':  return { line: `${dst}++;`, cmpSt };
+    case 'dec':  return { line: `${dst}--;`, cmpSt };
+    case 'neg':  return { line: `${dst} = -${dst};`, cmpSt };
+    case 'not':  return { line: `${dst} = ~${dst};`, cmpSt };
+    case 'and':  return { line: `${dst} &= ${src};`, cmpSt };
+    case 'or':   return { line: `${dst} |= ${src};`, cmpSt };
+    case 'xor':
+      if (args[0] && args[1] && normReg(args[0].toLowerCase()) === normReg(args[1].toLowerCase()))
+        return { line: `${dst} = 0;`, cmpSt };
+      return { line: `${dst} ^= ${src};`, cmpSt };
+    case 'shl': case 'sal': return { line: `${dst} <<= ${src};`, cmpSt };
+    case 'shr': case 'sar': return { line: `${dst} >>= ${src};`, cmpSt };
+
+    case 'cmp':
+      cmpSt = { left: dst, right: src };
+      return { line: null, cmpSt };
+    case 'test':
+      cmpSt = { left: dst, right: src === dst ? dst : src };
+      return { line: null, cmpSt };
+
+    case 'ret': return { line: `return ${vm('rax', varMap)};`, cmpSt };
+
+    case 'call': return { line: `${args[0]}();`, cmpSt };
+
+    case 'push': case 'pop': case 'nop': case 'cdq': case 'cqo':
+      return { line: null, cmpSt };
+
+    default:
+      // Unknown: emit as comment
+      return { line: `/* ${op} ${args.join(', ')} */`, cmpSt };
+  }
+}
+
+// Resolve an ASM operand to C expression
+function resolveArg(arg, dataVars, varMap) {
+  if (!arg) return arg;
+
+  // Strip size qualifiers: QWORD PTR [x] / QWORD [x]
+  const sizeMatch = arg.match(/^(?:QWORD|DWORD|WORD|BYTE)\s+(?:PTR\s+)?\[(.+)\]$/i);
+  if (sizeMatch) return resolveMemRef(sizeMatch[1].trim(), dataVars, varMap);
+
+  const memMatch = arg.match(/^\[(.+)\]$/);
+  if (memMatch) return resolveMemRef(memMatch[1].trim(), dataVars, varMap);
+
+  const lower = arg.toLowerCase();
+  if (isReg(lower)) return vm(normReg(lower), varMap);
+
+  // Numeric literals
+  if (/^-?\d+$/.test(arg) || /^0x[0-9a-fA-F]+$/i.test(arg)) return arg;
+
+  // Named constant / label
+  return vm(arg, varMap);
+}
+
+function resolveMemRef(inner, dataVars, varMap) {
+  // Simple: known data var
+  if (dataVars[inner]) return vm(inner, varMap);
+  // Register dereference
+  if (isReg(inner.toLowerCase())) return `*${vm(normReg(inner.toLowerCase()), varMap)}`;
+  // reg + offset (struct field / array)
+  const addMatch = inner.match(/^(\w+)\s*([+-])\s*(\w+)$/);
+  if (addMatch) {
+    const base = resolveArg(addMatch[1], dataVars, varMap);
+    const op   = addMatch[2];
+    const off  = resolveArg(addMatch[3], dataVars, varMap);
+    return `*(${base} ${op} ${off})`;
+  }
+  return `mem[${inner}]`;
+}
+
+// Apply varMap: if user renamed this, use the new name
+function vm(key, varMap) {
+  if (!key) return key;
+  return varMap[key] || varMap[key.toLowerCase()] || key;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  C EMITTER  (top level)
+// ══════════════════════════════════════════════════════════════
+function emitC(dataVars, blocks, blockMap, varMap) {
+  const out = [];
+
+  // Data vars as C globals
+  const dataLines = [];
+  for (const [name, info] of Object.entries(dataVars)) {
+    const n = vm(name, varMap);
+    if (info.kind === 'str') {
+      dataLines.push(`const char* ${n} = "${info.strVal}";`);
+    } else {
+      const ty = info.type === 'dq' ? 'long' : 'int';
+      dataLines.push(`${ty} ${n} = ${info.rawVal};`);
+    }
+  }
+  if (dataLines.length) {
+    out.push(...dataLines);
+    out.push('');
+  }
+
+  // Find main (or first block)
+  const mainBlock = blockMap['main'] || blocks[0];
+  if (!mainBlock) return '// Nicio funcție găsită';
+
+  out.push('int main() {');
+  const bodyLines = structureRange(blocks, mainBlock.index, blocks.length, blockMap, dataVars, varMap, 1);
+  out.push(...bodyLines);
+  out.push('}');
+
+  return out.join('\n');
+}
+
+// ══════════════════════════════════════════════════════════════
+//  VARIABLE DETECTION
+// ══════════════════════════════════════════════════════════════
+function collectVars(blocks, dataVars) {
+  const regs = new Set();
+  for (const b of blocks) {
+    for (const instr of b.instrs) {
+      for (const arg of instr.args || []) {
+        const lo = arg.toLowerCase().replace(/^(qword|dword|word|byte)\s*(ptr\s*)?\[|\]$/gi, '');
+        const n = normReg(lo.trim());
+        if (REGS64.includes(n) && n !== 'rbp' && n !== 'rsp') regs.add(n);
+      }
+    }
+  }
+  return { regs: [...regs], dataKeys: Object.keys(dataVars) };
+}
+
+// ══════════════════════════════════════════════════════════════
+//  UI
+// ══════════════════════════════════════════════════════════════
+function runDecompile() {
+  const src = document.getElementById('asmInput').value;
+  document.getElementById('errMsg').textContent = '';
+  if (!src.trim()) return;
+
+  try {
+    const { dataVars, instructions } = parseASM(src);
+    const { blocks, blockMap } = buildBlocks(instructions);
+    lastParsed = { dataVars, blocks, blockMap };
+
+    const code = emitC(dataVars, blocks, blockMap, varMap);
+    renderOutput(code);
+    buildRenameUI(dataVars, blocks);
+  } catch (e) {
+    document.getElementById('errMsg').textContent = 'Eroare: ' + e.message;
+    console.error(e);
+  }
+}
+
+function rerender() {
+  if (!lastParsed) return;
+  const { dataVars, blocks, blockMap } = lastParsed;
+  try {
+    const code = emitC(dataVars, blocks, blockMap, varMap);
+    renderOutput(code);
+  } catch (e) { console.error(e); }
+}
+
+function renderOutput(code) {
+  document.getElementById('cOutput').innerHTML = highlightC(code);
+}
+
+function buildRenameUI(dataVars, blocks) {
+  const { regs, dataKeys } = collectVars(blocks, dataVars);
+  const grid = document.getElementById('renameGrid');
+  grid.innerHTML = '';
+
+  const addItem = (key, badge) => {
+    const item = document.createElement('div');
+    item.className = 'rename-item';
+    item.innerHTML = `
+      <span class="rename-orig">${key}</span>
+      <span class="rename-arrow">→</span>
+      <input class="rename-input" type="text" placeholder="${key}" data-key="${key}" value="${varMap[key] || ''}">
+      <span class="rename-badge">${badge}</span>
+    `;
+    grid.appendChild(item);
+    item.querySelector('input').addEventListener('input', function() {
+      const v = this.value.trim();
+      if (v) varMap[this.dataset.key] = v;
+      else delete varMap[this.dataset.key];
+      rerender();
+    });
+  };
+
+  for (const r of regs)     addItem(r, 'reg');
+  for (const k of dataKeys) addItem(k, 'data');
+}
+
+function copyOutput() {
+  const text = document.getElementById('cOutput').innerText;
+  navigator.clipboard.writeText(text).catch(() => {});
+}
+
+// ══════════════════════════════════════════════════════════════
+//  SYNTAX HIGHLIGHTING
+// ══════════════════════════════════════════════════════════════
+function highlightC(code) {
+  const KW = /\b(int|long|char|void|return|if|else|do|while|for|const|struct|unsigned|static)\b/g;
+  const FN = /\b(printf|scanf|malloc|free|memcpy|strlen)\b/g;
+
+  let html = code
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  // strings
+  html = html.replace(/"((?:[^"\\]|\\.)*)"/g, '<span class="str">"$1"</span>');
+  // comments
+  html = html.replace(/(\/\/[^\n]*|\/\*[\s\S]*?\*\/)/g, '<span class="cmt">$1</span>');
+  // numbers (not inside strings/comments already replaced)
+  html = html.replace(/\b(-?(?:0x[0-9a-fA-F]+|\d+))\b/g, '<span class="num">$1</span>');
+  // functions
+  html = html.replace(FN, '<span class="fn">$1</span>');
+  // keywords
+  html = html.replace(KW, '<span class="kw">$1</span>');
+
+  return html;
+}
+</script>
+</body>
+</html>
