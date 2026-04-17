@@ -3,64 +3,66 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ASM → C Decompiler</title>
+<title>ASM ↔ C Tools</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Consolas', 'Monaco', monospace; background: #1e1e1e; color: #d4d4d4; min-height: 100vh; }
-.container { max-width: 1300px; margin: 0 auto; padding: 20px; }
-h1 { color: #569cd6; margin-bottom: 6px; font-size: 1.4rem; letter-spacing: 0.5px; }
-.subtitle { color: #6a9955; font-size: 0.8rem; margin-bottom: 20px; }
-.panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 12px; }
-.panel-label { color: #9cdcfe; margin-bottom: 6px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; }
+body { font-family: 'Consolas','Monaco',monospace; background: #1e1e1e; color: #d4d4d4; min-height: 100vh; }
+.container { max-width: 1300px; margin: 0 auto; padding: 24px 20px; }
+.tool-block { margin-bottom: 40px; }
+.tool-title { font-size: 1.2rem; color: #569cd6; margin-bottom: 4px; }
+.tool-sub   { font-size: 0.78rem; color: #6a9955; margin-bottom: 16px; }
+.divider { border: none; border-top: 1px solid #333; margin: 36px 0; }
+.panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 10px; }
+.panel-label { color: #9cdcfe; margin-bottom: 6px; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 1px; }
 textarea {
-  width: 100%; height: 420px; background: #252526; border: 1px solid #3c3c3c;
+  width: 100%; height: 400px; background: #252526; border: 1px solid #3c3c3c;
   color: #d4d4d4; padding: 12px; font-family: inherit; font-size: 0.82rem;
   resize: vertical; border-radius: 4px; outline: none; line-height: 1.5;
 }
 textarea:focus { border-color: #569cd6; }
 .output-box {
-  width: 100%; height: 420px; background: #252526; border: 1px solid #3c3c3c;
+  width: 100%; height: 400px; background: #252526; border: 1px solid #3c3c3c;
   padding: 12px; font-size: 0.82rem; border-radius: 4px; overflow-y: auto;
-  white-space: pre; line-height: 1.5;
+  white-space: pre; line-height: 1.5; font-family: inherit;
 }
-.btn-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.btn-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 button {
-  background: #0e639c; color: #fff; border: none; padding: 8px 22px;
-  cursor: pointer; border-radius: 4px; font-family: inherit; font-size: 0.88rem;
+  background: #0e639c; color: #fff; border: none; padding: 7px 20px;
+  cursor: pointer; border-radius: 4px; font-family: inherit; font-size: 0.85rem;
 }
 button:hover { background: #1177bb; }
-button.secondary { background: #3c3c3c; }
-button.secondary:hover { background: #505050; }
-.error { color: #f48771; font-size: 0.82rem; }
-.rename-section {
-  background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 16px;
-  margin-top: 8px;
-}
-.rename-section h2 { color: #9cdcfe; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
-.rename-grid { display: flex; flex-wrap: wrap; gap: 10px; }
-.rename-item { display: flex; align-items: center; gap: 6px; background: #2d2d2d; padding: 5px 10px; border-radius: 4px; }
-.rename-orig { color: #ce9178; font-size: 0.82rem; min-width: 60px; }
-.rename-arrow { color: #555; font-size: 0.75rem; }
+button.sec { background: #3c3c3c; }
+button.sec:hover { background: #505050; }
+.err { color: #f48771; font-size: 0.8rem; }
+.rename-section { background: #252526; border: 1px solid #3c3c3c; border-radius: 4px; padding: 14px; }
+.rename-section h3 { color: #9cdcfe; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+.rename-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.rename-item { display: flex; align-items: center; gap: 5px; background: #2d2d2d; padding: 4px 8px; border-radius: 4px; }
+.rename-orig { color: #6a9955; font-size: 0.75rem; min-width: 52px; }
+.rename-cur  { color: #ce9178; font-size: 0.8rem; min-width: 52px; }
 .rename-input {
   background: #1e1e1e; border: 1px solid #555; color: #d4d4d4;
-  padding: 3px 7px; border-radius: 3px; font-family: inherit; font-size: 0.82rem; width: 110px;
+  padding: 2px 6px; border-radius: 3px; font-family: inherit; font-size: 0.8rem; width: 100px;
 }
 .rename-input:focus { outline: none; border-color: #569cd6; }
-.rename-badge { font-size: 0.65rem; color: #6a9955; background: #1e3a1e; padding: 1px 5px; border-radius: 3px; }
-/* Syntax highlight classes */
+.badge { font-size: 0.6rem; color: #6a9955; background: #1e3a1e; padding: 1px 4px; border-radius: 3px; }
+/* highlight */
 .kw  { color: #569cd6; }
 .ty  { color: #4ec9b0; }
 .str { color: #ce9178; }
 .num { color: #b5cea8; }
 .cmt { color: #6a9955; }
 .fn  { color: #dcdcaa; }
+.lbl { color: #c586c0; }
 </style>
 </head>
 <body>
 <div class="container">
-  <h1>ASM → C Decompiler</h1>
-  <p class="subtitle">NASM x86-64 · fără goto · fără LLM</p>
 
+<!-- ═══════════════════════════════ TOOL 1: ASM → C ═══════════════════════════════ -->
+<div class="tool-block">
+  <div class="tool-title">ASM → C</div>
+  <div class="tool-sub">NASM x86-64 · fără goto · fără LLM</div>
   <div class="panels">
     <div>
       <div class="panel-label">Assembly Input</div>
@@ -71,623 +73,962 @@ button.secondary:hover { background: #505050; }
       <div class="output-box" id="cOutput"><span class="cmt">// Output-ul C va apărea aici</span></div>
     </div>
   </div>
-
   <div class="btn-row">
     <button onclick="runDecompile()">Decompilează →</button>
-    <button class="secondary" onclick="copyOutput()">Copiază C</button>
-    <span class="error" id="errMsg"></span>
+    <button class="sec" onclick="copyEl('cOutput')">Copiază C</button>
+    <span class="err" id="errMsg1"></span>
   </div>
-
   <div class="rename-section">
-    <h2>Redenumire variabile &amp; registre</h2>
+    <h3>Redenumire variabile</h3>
     <div class="rename-grid" id="renameGrid">
-      <span style="color:#555;font-size:0.82rem">Decompilează mai întâi pentru a vedea variabilele detectate.</span>
+      <span style="color:#555;font-size:0.8rem">Decompilează mai întâi.</span>
     </div>
   </div>
 </div>
 
-<script>
-// ══════════════════════════════════════════════════════════════
-//  GLOBALS
-// ══════════════════════════════════════════════════════════════
-let varMap = {};        // reg/dataVar → user name
-let lastParsed = null;  // { dataVars, blocks, blockMap }
+<hr class="divider">
 
-const REGS64 = ['rax','rbx','rcx','rdx','rsi','rdi','r8','r9','r10','r11','r12','r13','r14','r15'];
+<!-- ═══════════════════════════════ TOOL 2: C → ASM ══════════════════════════════ -->
+<div class="tool-block">
+  <div class="tool-title">C → ASM</div>
+  <div class="tool-sub">Subset C simplu → NASM x86-64 Linux · long, if/else, while, do-while, for, printf, return</div>
+  <div class="panels">
+    <div>
+      <div class="panel-label">C Input</div>
+      <textarea id="cInput" spellcheck="false" placeholder="int main() {
+    long x = 10;
+    long i = 0;
+    if (x > 5) {
+        do {
+            printf(&quot;%d\n&quot;, i);
+            i++;
+        } while (i < x);
+    }
+    return 0;
+}"></textarea>
+    </div>
+    <div>
+      <div class="panel-label">Assembly Output</div>
+      <div class="output-box" id="asmOutput"><span class="cmt">; Output-ul ASM va apărea aici</span></div>
+    </div>
+  </div>
+  <div class="btn-row">
+    <button onclick="runCompile()">Compilează →</button>
+    <button class="sec" onclick="copyEl('asmOutput')">Copiază ASM</button>
+    <span class="err" id="errMsg2"></span>
+  </div>
+</div>
+
+</div><!-- /container -->
+<script>
+// ══════════════════════════════════════════════════════════════════════════════
+//  SHARED HELPERS
+// ══════════════════════════════════════════════════════════════════════════════
+function copyEl(id) {
+  navigator.clipboard.writeText(document.getElementById(id).innerText).catch(()=>{});
+}
+
+const REGS64    = ['rax','rbx','rcx','rdx','rsi','rdi','r8','r9','r10','r11','r12','r13','r14','r15'];
 const REG32TO64 = {eax:'rax',ebx:'rbx',ecx:'rcx',edx:'rdx',esi:'rsi',edi:'rdi',
   r8d:'r8',r9d:'r9',r10d:'r10',r11d:'r11',r12d:'r12',r13d:'r13',r14d:'r14',r15d:'r15'};
-const ALL_REGS = [...REGS64, ...Object.keys(REG32TO64)];
+const ALL_REGS  = [...REGS64,...Object.keys(REG32TO64)];
 const COND_JUMPS = new Set(['je','jne','jg','jl','jge','jle','ja','jb','jae','jbe','jz','jnz','js','jns']);
-const UNCOND_JUMP = 'jmp';
 
-function normReg(r) { return REG32TO64[r] || r; }
-function isReg(s) { return ALL_REGS.includes(s.toLowerCase()); }
+function normReg(r) { return REG32TO64[r]||r; }
+function isReg(s)   { return ALL_REGS.includes(s.toLowerCase()); }
 
-// ══════════════════════════════════════════════════════════════
-//  PARSER
-// ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
+//  TOOL 1 — ASM → C  (decompiler)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// varMap: reg/dataVarName → display name (auto or user-overridden)
+// userOverrides: user-typed names that survive re-decompile
+let varMap       = {};
+let userOverrides= {};
+let lastParsed   = null;
+let autoNames    = {}; // reg → 'var1' etc., data → 'string1'/'num1'
+
+// ─── Parser ───────────────────────────────────────────────────────────────────
 function parseASM(src) {
-  const dataVars = {};   // name → { type, rawVal, strVal }
-  const instructions = []; // { label, op, args }
-
-  let section = '';
-  let pendingLabel = null;
+  const dataVars   = {};
+  const instructions = [];
+  let section = '', pendingLabel = null;
 
   for (let raw of src.split('\n')) {
-    // Strip inline comments (but not inside backtick strings)
-    let line = stripComment(raw).trim();
+    let line = stripSemiComment(raw).trim();
     if (!line) continue;
+    if (/^%/.test(line)||/^(global|extern)\b/i.test(line)) continue;
+    if (/^section\s+\.data/i.test(line)) { section='data'; continue; }
+    if (/^section\s+\.text/i.test(line)) { section='text'; continue; }
+    if (/^section\s+\.bss/i.test(line))  { section='bss';  continue; }
 
-    // Preprocessor / directives
-    if (/^%/.test(line) || /^(global|extern)\b/i.test(line)) continue;
-    if (/^section\s+\.data/i.test(line)) { section = 'data'; continue; }
-    if (/^section\s+\.text/i.test(line)) { section = 'text'; continue; }
-    if (/^section\s+\.bss/i.test(line))  { section = 'bss';  continue; }
-
-    // Label at start of line
-    const labelMatch = line.match(/^(\w+):\s*(.*)?$/);
-    if (labelMatch) {
-      const lbl = labelMatch[1];
-      const rest = (labelMatch[2] || '').trim();
-
-      if (section === 'data') {
+    const lm = line.match(/^(\w+):\s*(.*)?$/);
+    if (lm) {
+      const lbl = lm[1], rest = (lm[2]||'').trim();
+      if (section==='data') {
         const dm = rest.match(/^(db|dw|dd|dq)\s+(.+)$/i);
-        if (dm) {
-          dataVars[lbl] = parseDataDef(dm[1].toLowerCase(), dm[2].trim());
-        }
-        pendingLabel = null;
-        continue;
+        if (dm) dataVars[lbl] = parseDataDef(dm[1].toLowerCase(), dm[2].trim());
+        pendingLabel = null; continue;
       }
-
-      // text section
-      if (rest) {
-        instructions.push(parseLine(rest, lbl));
-        pendingLabel = null;
-      } else {
-        pendingLabel = lbl;
-      }
+      if (rest) { instructions.push(parseLine(rest, lbl)); pendingLabel=null; }
+      else       pendingLabel = lbl;
       continue;
     }
-
-    if (section === 'text') {
-      instructions.push(parseLine(line, pendingLabel));
-      pendingLabel = null;
-    }
+    if (section==='text') { instructions.push(parseLine(line, pendingLabel)); pendingLabel=null; }
   }
-
   return { dataVars, instructions };
 }
 
-function stripComment(line) {
-  // Preserve backtick strings, strip ; comments outside them
-  let inBt = false;
-  for (let i = 0; i < line.length; i++) {
-    if (line[i] === '`') inBt = !inBt;
-    if (!inBt && line[i] === ';') return line.slice(0, i);
+function stripSemiComment(line) {
+  let inBt=false;
+  for (let i=0;i<line.length;i++) {
+    if (line[i]==='`') inBt=!inBt;
+    if (!inBt && line[i]===';') return line.slice(0,i);
   }
   return line;
 }
 
 function parseDataDef(type, val) {
-  // Backtick or quoted string
-  const btMatch = val.match(/^`([^`]*)`/);
-  if (btMatch) return { type, kind: 'str', strVal: unescapeStr(btMatch[1]) };
-  const qMatch = val.match(/^"([^"]*)"/);
-  if (qMatch) return { type, kind: 'str', strVal: qMatch[1] };
-  const sqMatch = val.match(/^'([^']*)'/);
-  if (sqMatch) return { type, kind: 'str', strVal: sqMatch[1] };
-  // Number
-  return { type, kind: 'num', rawVal: val.split(',')[0].trim() };
+  const bt=val.match(/^`([^`]*)`/); if(bt) return {type,kind:'str',strVal:unesc(bt[1])};
+  const q =val.match(/^"([^"]*)"/); if(q)  return {type,kind:'str',strVal:q[1]};
+  const sq=val.match(/^'([^']*)'/); if(sq) return {type,kind:'str',strVal:sq[1]};
+  return {type,kind:'num',rawVal:val.split(',')[0].trim()};
 }
-
-function unescapeStr(s) {
-  return s.replace(/\\n/g, '\\n').replace(/\\t/g, '\\t').replace(/\\x00?/g, '').replace(/,\s*0$/,'');
-}
+function unesc(s){ return s.replace(/\\n/g,'\\n').replace(/\\t/g,'\\t').replace(/\\x0*\d*/g,'').replace(/,\s*0$/,''); }
 
 function parseLine(line, label) {
-  // PRINTF64 macro (backtick format string)
-  const p64 = line.match(/^PRINTF64\s+`([^`]*)`,?\s*(.*)?$/i);
-  if (p64) {
-    const fmt = p64[1];
-    const rest = (p64[2] || '').trim();
-    const args = rest ? splitArgs(rest) : [];
-    return { label, op: 'PRINTF64', args: [fmt, ...args] };
-  }
-
-  const spaceIdx = line.search(/\s/);
-  if (spaceIdx === -1) return { label, op: line.toLowerCase(), args: [] };
-  const op = line.slice(0, spaceIdx).toLowerCase();
-  const argStr = line.slice(spaceIdx).trim();
-  return { label, op, args: splitArgs(argStr) };
+  const p=line.match(/^PRINTF64\s+`([^`]*)`,?\s*(.*)?$/i);
+  if (p) { return {label, op:'PRINTF64', args:[p[1],...(p[2]?splitArgs(p[2]):[])] }; }
+  const si=line.search(/\s/);
+  if (si===-1) return {label, op:line.toLowerCase(), args:[]};
+  return {label, op:line.slice(0,si).toLowerCase(), args:splitArgs(line.slice(si).trim())};
 }
 
 function splitArgs(s) {
-  const res = [];
-  let depth = 0, cur = '';
+  const res=[]; let d=0, cur='';
   for (const ch of s) {
-    if (ch === '[') depth++;
-    else if (ch === ']') depth--;
-    if (ch === ',' && depth === 0) { res.push(cur.trim()); cur = ''; }
-    else cur += ch;
+    if(ch==='[') d++; else if(ch===']') d--;
+    if(ch===','&&d===0){res.push(cur.trim());cur='';}else cur+=ch;
   }
-  if (cur.trim()) res.push(cur.trim());
+  if(cur.trim()) res.push(cur.trim());
   return res;
 }
 
-// ══════════════════════════════════════════════════════════════
-//  BASIC BLOCK BUILDER
-// ══════════════════════════════════════════════════════════════
+// ─── Block builder ────────────────────────────────────────────────────────────
 function buildBlocks(instructions) {
-  const blocks = [];
-  let cur = null;
-
-  function flush() { if (cur) { blocks.push(cur); cur = null; } }
+  const blocks=[]; let cur=null;
+  const flush=()=>{ if(cur){blocks.push(cur);cur=null;} };
 
   for (const instr of instructions) {
-    if (!cur || instr.label) {
+    if (!cur||instr.label) {
       flush();
-      cur = {
-        id: instr.label || `_b${blocks.length}`,
-        index: blocks.length,   // will fix after
-        instrs: [],
-        jumpOp: null,
-        jumpTarget: null,
-        isRet: false,
-      };
+      cur={id:instr.label||`_b${blocks.length}`,index:0,instrs:[],jumpOp:null,jumpTarget:null,isRet:false};
     }
     cur.instrs.push(instr);
-
-    if (COND_JUMPS.has(instr.op)) {
-      cur.jumpOp = instr.op;
-      cur.jumpTarget = instr.args[0];
-      flush();
-    } else if (instr.op === UNCOND_JUMP) {
-      cur.jumpOp = UNCOND_JUMP;
-      cur.jumpTarget = instr.args[0];
-      flush();
-    } else if (instr.op === 'ret') {
-      cur.isRet = true;
-      flush();
-    }
+    if (COND_JUMPS.has(instr.op))  { cur.jumpOp=instr.op; cur.jumpTarget=instr.args[0]; flush(); }
+    else if (instr.op==='jmp')     { cur.jumpOp='jmp';    cur.jumpTarget=instr.args[0]; flush(); }
+    else if (instr.op==='ret')     { cur.isRet=true; flush(); }
   }
   flush();
+  blocks.forEach((b,i)=>b.index=i);
+  const blockMap={};
+  blocks.forEach(b=>blockMap[b.id]=b);
 
-  // Fix indices
-  blocks.forEach((b, i) => b.index = i);
-
-  // Build blockMap
-  const blockMap = {};
-  blocks.forEach(b => { blockMap[b.id] = b; });
-
-  // Compute successors
-  for (let i = 0; i < blocks.length; i++) {
-    const b = blocks[i];
-    b.succs = [];
-    if (b.isRet) continue;
-
-    if (b.jumpOp === UNCOND_JUMP) {
-      const t = blockMap[b.jumpTarget];
-      if (t) b.succs.push(t.id);
-    } else if (COND_JUMPS.has(b.jumpOp)) {
-      const t = blockMap[b.jumpTarget];
-      if (t) b.succs.push(t.id);              // taken (then)
-      if (blocks[i + 1]) b.succs.push(blocks[i + 1].id); // fallthrough (else)
-    } else {
-      if (blocks[i + 1]) b.succs.push(blocks[i + 1].id);
-    }
+  for (let i=0;i<blocks.length;i++) {
+    const b=blocks[i]; b.succs=[];
+    if(b.isRet) continue;
+    if(b.jumpOp==='jmp') { const t=blockMap[b.jumpTarget]; if(t) b.succs.push(t.id); }
+    else if(COND_JUMPS.has(b.jumpOp)) {
+      const t=blockMap[b.jumpTarget]; if(t) b.succs.push(t.id);
+      if(blocks[i+1]) b.succs.push(blocks[i+1].id);
+    } else { if(blocks[i+1]) b.succs.push(blocks[i+1].id); }
   }
-
-  return { blocks, blockMap };
+  return {blocks,blockMap};
 }
 
-// ══════════════════════════════════════════════════════════════
-//  STRUCTURER  (linear scan, pattern-based)
-// ══════════════════════════════════════════════════════════════
-
-// Returns array of C-line strings
-function structureRange(blocks, start, end, blockMap, dataVars, varMap, indent) {
-  const lines = [];
-  const pad = '    '.repeat(indent);
-  let cmpSt = null; // { left, right } — last seen cmp/test
-  let i = start;
-
-  while (i < end) {
-    const block = blocks[i];
-
-    // ── Detect back edge → do-while ──────────────────────────
-    // A block in [i, end) that has a conditional jump back to blocks[i]
-    const backSrcIdx = findBackEdgeSrc(block.id, blocks, i, end, blockMap);
-    if (backSrcIdx !== -1) {
-      const loopEnd = blocks[backSrcIdx];
-      // Emit loop body (blocks i..backSrcIdx), last block skips its jump
-      const bodyLines = [];
-      let innerCmp = null;
-      for (let j = i; j <= backSrcIdx; j++) {
-        const skipJump = (j === backSrcIdx);
-        const res = emitBlockInstrs(blocks[j], dataVars, varMap, indent + 1, skipJump);
-        innerCmp = res.cmpSt || innerCmp;
-        bodyLines.push(...res.lines);
+// ─── Structurer ───────────────────────────────────────────────────────────────
+function structureRange(blocks,start,end,blockMap,dataVars,vmap,indent) {
+  const lines=[]; const pad='    '.repeat(indent);
+  let cmpSt=null; let i=start;
+  while(i<end) {
+    const block=blocks[i];
+    const backIdx=findBackEdgeSrc(block.id,blocks,i,end,blockMap);
+    if(backIdx!==-1) {
+      const loopEnd=blocks[backIdx];
+      const bodyLines=[]; let ic=null;
+      for(let j=i;j<=backIdx;j++){
+        const r=emitBlockInstrs(blocks[j],dataVars,vmap,indent+1,j===backIdx);
+        ic=r.cmpSt||ic; bodyLines.push(...r.lines);
       }
-      const cond = buildCond(loopEnd.jumpOp, innerCmp, varMap);
-      lines.push(`${pad}do {`);
-      lines.push(...bodyLines);
-      lines.push(`${pad}} while (${cond});`);
-      i = backSrcIdx + 1;
-      continue;
+      const cond=buildCond(loopEnd.jumpOp,ic,vmap);
+      lines.push(`${pad}do {`); lines.push(...bodyLines); lines.push(`${pad}} while (${cond});`);
+      i=backIdx+1; continue;
     }
 
-    // ── Detect forward conditional jump → if / else ──────────
-    if (COND_JUMPS.has(block.jumpOp)) {
-      const target = blockMap[block.jumpTarget];
-      if (target && target.index > block.index && target.index <= end) {
-        const tIdx = target.index;
-        const ftIdx = i + 1; // fallthrough index
-
-        // Emit this block's instructions (skip last jump)
-        const res = emitBlockInstrs(block, dataVars, varMap, indent, true);
-        cmpSt = res.cmpSt || cmpSt;
-        lines.push(...res.lines);
-
-        const cond = buildCond(block.jumpOp, res.cmpSt || cmpSt, varMap);
-
-        // then-branch  = blocks [tIdx, end)
-        // else-branch  = blocks [ftIdx, tIdx)
-        const thenLines = structureRange(blocks, tIdx, end, blockMap, dataVars, varMap, indent + 1);
-        const elseLines = structureRange(blocks, ftIdx, tIdx, blockMap, dataVars, varMap, indent + 1);
-
-        lines.push(`${pad}if (${cond}) {`);
-        lines.push(...thenLines);
-        if (elseLines.length > 0) {
-          lines.push(`${pad}} else {`);
-          lines.push(...elseLines);
-        }
+    if(COND_JUMPS.has(block.jumpOp)) {
+      const target=blockMap[block.jumpTarget];
+      if(target&&target.index>block.index&&target.index<=end) {
+        const tIdx=target.index, ftIdx=i+1;
+        const res=emitBlockInstrs(block,dataVars,vmap,indent,true);
+        cmpSt=res.cmpSt||cmpSt; lines.push(...res.lines);
+        const cond=buildCond(block.jumpOp,res.cmpSt||cmpSt,vmap);
+        const thenL=structureRange(blocks,tIdx,end,blockMap,dataVars,vmap,indent+1);
+        const elseL=structureRange(blocks,ftIdx,tIdx,blockMap,dataVars,vmap,indent+1);
+        lines.push(`${pad}if (${cond}) {`); lines.push(...thenL);
+        if(elseL.length){lines.push(`${pad}} else {`); lines.push(...elseL);}
         lines.push(`${pad}}`);
-
-        i = end; // consumed all
-        continue;
+        i=end; continue;
       }
     }
 
-    // ── Unconditional forward jump: skip to target ────────────
-    if (block.jumpOp === UNCOND_JUMP) {
-      const target = blockMap[block.jumpTarget];
-      if (target && target.index > block.index) {
-        // Emit non-jump instrs, then continue from target
-        const res = emitBlockInstrs(block, dataVars, varMap, indent, true);
-        cmpSt = res.cmpSt || cmpSt;
-        lines.push(...res.lines);
-        i = target.index;
-        continue;
+    if(block.jumpOp==='jmp') {
+      const target=blockMap[block.jumpTarget];
+      if(target&&target.index>block.index){
+        const res=emitBlockInstrs(block,dataVars,vmap,indent,true);
+        cmpSt=res.cmpSt||cmpSt; lines.push(...res.lines);
+        i=target.index; continue;
       }
     }
 
-    // ── Regular block ─────────────────────────────────────────
-    const res = emitBlockInstrs(block, dataVars, varMap, indent, false);
-    cmpSt = res.cmpSt || cmpSt;
-    lines.push(...res.lines);
-    i++;
+    const res=emitBlockInstrs(block,dataVars,vmap,indent,false);
+    cmpSt=res.cmpSt||cmpSt; lines.push(...res.lines); i++;
   }
-
   return lines;
 }
 
-function findBackEdgeSrc(headerId, blocks, start, end, blockMap) {
-  // Return index of a block in [start, end) that jumps back to blocks[start]
-  for (let i = start; i < end; i++) {
-    const b = blocks[i];
-    if (COND_JUMPS.has(b.jumpOp) && b.jumpTarget === headerId) {
-      const target = blockMap[b.jumpTarget];
-      if (target && target.index <= i) return i;
+function findBackEdgeSrc(hid,blocks,start,end,blockMap) {
+  for(let i=start;i<end;i++){
+    const b=blocks[i];
+    if(COND_JUMPS.has(b.jumpOp)&&b.jumpTarget===hid){
+      const t=blockMap[b.jumpTarget]; if(t&&t.index<=i) return i;
     }
   }
   return -1;
 }
 
-function buildCond(jumpOp, cmpSt, varMap) {
-  if (!cmpSt) return '/* cond */';
-  const L = vm(cmpSt.left, varMap);
-  const R = vm(cmpSt.right, varMap);
-  const map = {
-    jg: `${L} > ${R}`, jl: `${L} < ${R}`,
-    jge: `${L} >= ${R}`, jle: `${L} <= ${R}`,
-    je: `${L} == ${R}`, jne: `${L} != ${R}`,
-    jz: `${L} == 0`, jnz: `${L} != 0`,
-    ja: `${L} > ${R}`, jb: `${L} < ${R}`,
-    jae: `${L} >= ${R}`, jbe: `${L} <= ${R}`,
-    js: `${L} < 0`, jns: `${L} >= 0`,
-  };
-  return map[jumpOp] || `${jumpOp}(${L}, ${R})`;
+function buildCond(op,cmpSt,vmap) {
+  if(!cmpSt) return '/* cond */';
+  const L=vmr(cmpSt.left,vmap), R=vmr(cmpSt.right,vmap);
+  const m={jg:`${L} > ${R}`,jl:`${L} < ${R}`,jge:`${L} >= ${R}`,jle:`${L} <= ${R}`,
+    je:`${L} == ${R}`,jne:`${L} != ${R}`,jz:`${L} == 0`,jnz:`${L} != 0`,
+    ja:`${L} > ${R}`,jb:`${L} < ${R}`,jae:`${L} >= ${R}`,jbe:`${L} <= ${R}`,
+    js:`${L} < 0`,jns:`${L} >= 0`};
+  return m[op]||`${op}(${L},${R})`;
 }
 
-// ══════════════════════════════════════════════════════════════
-//  INSTRUCTION EMITTER
-// ══════════════════════════════════════════════════════════════
-// Returns { lines: string[], cmpSt: {left,right}|null }
-function emitBlockInstrs(block, dataVars, varMap, indent, skipLastJump) {
-  const pad = '    '.repeat(indent);
-  const lines = [];
-  let cmpSt = null;
-  const instrs = block.instrs;
-  const last = instrs.length - 1;
-
-  for (let i = 0; i < instrs.length; i++) {
-    const instr = instrs[i];
-    const isLast = i === last;
-
-    // Skip prologue
-    if (instr.op === 'push' && instr.args[0]?.toLowerCase() === 'rbp') continue;
-    if (instr.op === 'pop'  && instr.args[0]?.toLowerCase() === 'rbp') continue;
-    if (instr.op === 'mov'  && instr.args[0]?.toLowerCase() === 'rbp' && instr.args[1]?.toLowerCase() === 'rsp') continue;
-    if (instr.op === 'leave') continue;
-
-    // Skip last jump if requested
-    if (isLast && skipLastJump && (COND_JUMPS.has(instr.op) || instr.op === UNCOND_JUMP)) continue;
-
-    const result = instrToC(instr, dataVars, varMap);
-    if (result.cmpSt) cmpSt = result.cmpSt;
-    if (result.line !== null) lines.push(`${pad}${result.line}`);
+// ─── Instruction → C line ─────────────────────────────────────────────────────
+function emitBlockInstrs(block,dataVars,vmap,indent,skipLastJump) {
+  const pad='    '.repeat(indent); const lines=[]; let cmpSt=null;
+  const instrs=block.instrs; const last=instrs.length-1;
+  for(let i=0;i<instrs.length;i++){
+    const instr=instrs[i]; const isLast=i===last;
+    if(instr.op==='push'&&instr.args[0]?.toLowerCase()==='rbp') continue;
+    if(instr.op==='pop' &&instr.args[0]?.toLowerCase()==='rbp') continue;
+    if(instr.op==='mov' &&instr.args[0]?.toLowerCase()==='rbp'&&instr.args[1]?.toLowerCase()==='rsp') continue;
+    if(instr.op==='leave') continue;
+    if(isLast&&skipLastJump&&(COND_JUMPS.has(instr.op)||instr.op==='jmp')) continue;
+    const r=instrToC(instr,dataVars,vmap);
+    if(r.cmpSt) cmpSt=r.cmpSt;
+    if(r.line!==null) lines.push(`${pad}${r.line}`);
   }
-
-  return { lines, cmpSt };
+  return {lines,cmpSt};
 }
 
-// Returns { line: string|null, cmpSt: obj|null }
-function instrToC(instr, dataVars, varMap) {
-  const { op, args } = instr;
-  let cmpSt = null;
+function instrToC(instr,dataVars,vmap) {
+  const {op,args}=instr; let cmpSt=null;
+  const dst=args[0]?resolveArg(args[0],dataVars,vmap):null;
+  const src=args[1]?resolveArg(args[1],dataVars,vmap):null;
 
-  const dst = args[0] ? resolveArg(args[0], dataVars, varMap) : null;
-  const src = args[1] ? resolveArg(args[1], dataVars, varMap) : null;
-
-  if (op === 'PRINTF64') {
-    // args[0] = raw format string (from backticks)
-    let fmt = args[0]
-      .replace(/\\n/g, '\\n')
-      .replace(/\\x00?/g, '')
-      .replace(/\\0/g, '');
-    const pargs = args.slice(1).map(a => resolveArg(a, dataVars, varMap));
-    const call = pargs.length
-      ? `printf("${fmt}", ${pargs.join(', ')});`
-      : `printf("${fmt}");`;
-    return { line: call, cmpSt };
+  if(op==='PRINTF64'){
+    let fmt=args[0].replace(/\\n/g,'\\n').replace(/\\x0*\d*/g,'');
+    const pa=args.slice(1).map(a=>resolveArg(a,dataVars,vmap));
+    return {line:pa.length?`printf("${fmt}", ${pa.join(', ')});`:`printf("${fmt}");`,cmpSt};
   }
-
-  switch (op) {
-    case 'mov':
-      if (!dst || !src) return { line: null, cmpSt };
-      return { line: `${dst} = ${src};`, cmpSt };
-
-    case 'lea':
-      if (!dst || !src) return { line: null, cmpSt };
-      return { line: `${dst} = &${src};`, cmpSt };
-
-    case 'add': return { line: `${dst} += ${src};`, cmpSt };
-    case 'sub': return { line: `${dst} -= ${src};`, cmpSt };
-    case 'imul':
-      if (args.length === 3) {
-        const s2 = resolveArg(args[2], dataVars, varMap);
-        return { line: `${dst} = ${src} * ${s2};`, cmpSt };
-      }
-      return { line: `${dst} *= ${src};`, cmpSt };
-    case 'mul':  return { line: `rax *= ${dst};`, cmpSt };
-    case 'idiv': return { line: `rax = rax / ${dst}; rdx = rax % ${dst};`, cmpSt };
-    case 'div':  return { line: `rax = rax / ${dst}; rdx = rax % ${dst};`, cmpSt };
-    case 'inc':  return { line: `${dst}++;`, cmpSt };
-    case 'dec':  return { line: `${dst}--;`, cmpSt };
-    case 'neg':  return { line: `${dst} = -${dst};`, cmpSt };
-    case 'not':  return { line: `${dst} = ~${dst};`, cmpSt };
-    case 'and':  return { line: `${dst} &= ${src};`, cmpSt };
-    case 'or':   return { line: `${dst} |= ${src};`, cmpSt };
+  switch(op){
+    case 'mov':  return {line:dst&&src?`${dst} = ${src};`:null,cmpSt};
+    case 'lea':  return {line:`${dst} = &${src};`,cmpSt};
+    case 'add':  return {line:`${dst} += ${src};`,cmpSt};
+    case 'sub':  return {line:`${dst} -= ${src};`,cmpSt};
+    case 'imul': if(args.length===3){const s2=resolveArg(args[2],dataVars,vmap);return{line:`${dst} = ${src} * ${s2};`,cmpSt};} return{line:`${dst} *= ${src};`,cmpSt};
+    case 'mul':  return {line:`rax *= ${dst};`,cmpSt};
+    case 'idiv': return {line:`rax /= ${dst};`,cmpSt};
+    case 'inc':  return {line:`${dst}++;`,cmpSt};
+    case 'dec':  return {line:`${dst}--;`,cmpSt};
+    case 'neg':  return {line:`${dst} = -${dst};`,cmpSt};
+    case 'not':  return {line:`${dst} = ~${dst};`,cmpSt};
+    case 'and':  return {line:`${dst} &= ${src};`,cmpSt};
+    case 'or':   return {line:`${dst} |= ${src};`,cmpSt};
     case 'xor':
-      if (args[0] && args[1] && normReg(args[0].toLowerCase()) === normReg(args[1].toLowerCase()))
-        return { line: `${dst} = 0;`, cmpSt };
-      return { line: `${dst} ^= ${src};`, cmpSt };
-    case 'shl': case 'sal': return { line: `${dst} <<= ${src};`, cmpSt };
-    case 'shr': case 'sar': return { line: `${dst} >>= ${src};`, cmpSt };
-
-    case 'cmp':
-      cmpSt = { left: dst, right: src };
-      return { line: null, cmpSt };
-    case 'test':
-      cmpSt = { left: dst, right: src === dst ? dst : src };
-      return { line: null, cmpSt };
-
-    case 'ret': return { line: `return ${vm('rax', varMap)};`, cmpSt };
-
-    case 'call': return { line: `${args[0]}();`, cmpSt };
-
-    case 'push': case 'pop': case 'nop': case 'cdq': case 'cqo':
-      return { line: null, cmpSt };
-
-    default:
-      // Unknown: emit as comment
-      return { line: `/* ${op} ${args.join(', ')} */`, cmpSt };
+      if(args[0]&&args[1]&&normReg(args[0].toLowerCase())===normReg(args[1].toLowerCase()))
+        return {line:`${dst} = 0;`,cmpSt};
+      return {line:`${dst} ^= ${src};`,cmpSt};
+    case 'shl': case 'sal': return {line:`${dst} <<= ${src};`,cmpSt};
+    case 'shr': case 'sar': return {line:`${dst} >>= ${src};`,cmpSt};
+    case 'cmp':  cmpSt={left:dst,right:src}; return {line:null,cmpSt};
+    case 'test': cmpSt={left:dst,right:src}; return {line:null,cmpSt};
+    case 'ret':  return {line:`return ${vmr('rax',vmap)};`,cmpSt};
+    case 'call': return {line:`${args[0]}();`,cmpSt};
+    case 'push': case 'pop': case 'nop': case 'cdq': case 'cqo': return {line:null,cmpSt};
+    default: return {line:`/* ${op} ${args.join(', ')} */`,cmpSt};
   }
 }
 
-// Resolve an ASM operand to C expression
-function resolveArg(arg, dataVars, varMap) {
-  if (!arg) return arg;
-
-  // Strip size qualifiers: QWORD PTR [x] / QWORD [x]
-  const sizeMatch = arg.match(/^(?:QWORD|DWORD|WORD|BYTE)\s+(?:PTR\s+)?\[(.+)\]$/i);
-  if (sizeMatch) return resolveMemRef(sizeMatch[1].trim(), dataVars, varMap);
-
-  const memMatch = arg.match(/^\[(.+)\]$/);
-  if (memMatch) return resolveMemRef(memMatch[1].trim(), dataVars, varMap);
-
-  const lower = arg.toLowerCase();
-  if (isReg(lower)) return vm(normReg(lower), varMap);
-
-  // Numeric literals
-  if (/^-?\d+$/.test(arg) || /^0x[0-9a-fA-F]+$/i.test(arg)) return arg;
-
-  // Named constant / label
-  return vm(arg, varMap);
+function resolveArg(arg,dataVars,vmap) {
+  if(!arg) return arg;
+  const sm=arg.match(/^(?:QWORD|DWORD|WORD|BYTE)\s+(?:PTR\s+)?\[(.+)\]$/i);
+  if(sm) return resolveMemRef(sm[1].trim(),dataVars,vmap);
+  const mm=arg.match(/^\[(.+)\]$/);
+  if(mm) return resolveMemRef(mm[1].trim(),dataVars,vmap);
+  const lo=arg.toLowerCase();
+  if(isReg(lo)) return vmr(normReg(lo),vmap);
+  if(/^-?\d+$/.test(arg)||/^0x[0-9a-fA-F]+$/i.test(arg)) return arg;
+  return vmr(arg,vmap);
 }
 
-function resolveMemRef(inner, dataVars, varMap) {
-  // Simple: known data var
-  if (dataVars[inner]) return vm(inner, varMap);
-  // Register dereference
-  if (isReg(inner.toLowerCase())) return `*${vm(normReg(inner.toLowerCase()), varMap)}`;
-  // reg + offset (struct field / array)
-  const addMatch = inner.match(/^(\w+)\s*([+-])\s*(\w+)$/);
-  if (addMatch) {
-    const base = resolveArg(addMatch[1], dataVars, varMap);
-    const op   = addMatch[2];
-    const off  = resolveArg(addMatch[3], dataVars, varMap);
-    return `*(${base} ${op} ${off})`;
-  }
+function resolveMemRef(inner,dataVars,vmap) {
+  if(dataVars[inner]) return vmr(inner,vmap);
+  if(isReg(inner.toLowerCase())) return `*${vmr(normReg(inner.toLowerCase()),vmap)}`;
+  const am=inner.match(/^(\w+)\s*([+-])\s*(\w+)$/);
+  if(am){ const b=resolveArg(am[1],dataVars,vmap),o=resolveArg(am[3],dataVars,vmap); return `*(${b} ${am[2]} ${o})`; }
   return `mem[${inner}]`;
 }
 
-// Apply varMap: if user renamed this, use the new name
-function vm(key, varMap) {
-  if (!key) return key;
-  return varMap[key] || varMap[key.toLowerCase()] || key;
+function vmr(key,vmap) { if(!key) return key; return vmap[key]||vmap[key.toLowerCase()]||key; }
+
+// ─── Auto-naming ──────────────────────────────────────────────────────────────
+function buildAutoNames(regs,dataVars) {
+  const m={}; let vi=1,si=1,ni=1;
+  for(const [name,info] of Object.entries(dataVars))
+    m[name] = info.kind==='str' ? `string${si++}` : `num${ni++}`;
+  for(const r of regs) m[r]=`var${vi++}`;
+  return m;
 }
 
-// ══════════════════════════════════════════════════════════════
-//  C EMITTER  (top level)
-// ══════════════════════════════════════════════════════════════
-function emitC(dataVars, blocks, blockMap, varMap) {
-  const out = [];
-
-  // Data vars as C globals
-  const dataLines = [];
-  for (const [name, info] of Object.entries(dataVars)) {
-    const n = vm(name, varMap);
-    if (info.kind === 'str') {
-      dataLines.push(`const char* ${n} = "${info.strVal}";`);
-    } else {
-      const ty = info.type === 'dq' ? 'long' : 'int';
-      dataLines.push(`${ty} ${n} = ${info.rawVal};`);
-    }
+function collectRegs(blocks) {
+  const seen=new Set(), order=[];
+  for(const b of blocks) for(const ins of b.instrs) for(const a of ins.args||[]) {
+    const lo=a.toLowerCase().replace(/^(qword|dword|word|byte)\s*(ptr\s*)?\[|\]$/gi,'').trim();
+    const n=normReg(lo);
+    if(REGS64.includes(n)&&n!=='rbp'&&n!=='rsp'&&!seen.has(n)){seen.add(n);order.push(n);}
   }
-  if (dataLines.length) {
-    out.push(...dataLines);
-    out.push('');
+  return order;
+}
+
+// ─── C emitter (top-level) ────────────────────────────────────────────────────
+function emitC(dataVars,blocks,blockMap,vmap) {
+  const out=[];
+  for(const [name,info] of Object.entries(dataVars)){
+    const n=vmr(name,vmap);
+    out.push(info.kind==='str'?`const char* ${n} = "${info.strVal}";`:`${info.type==='dq'?'long':'int'} ${n} = ${info.rawVal};`);
   }
-
-  // Find main (or first block)
-  const mainBlock = blockMap['main'] || blocks[0];
-  if (!mainBlock) return '// Nicio funcție găsită';
-
+  if(out.length) out.push('');
+  const mainBlock=blockMap['main']||blocks[0];
+  if(!mainBlock) return '// Nicio funcție găsită';
   out.push('int main() {');
-  const bodyLines = structureRange(blocks, mainBlock.index, blocks.length, blockMap, dataVars, varMap, 1);
-  out.push(...bodyLines);
+  out.push(...structureRange(blocks,mainBlock.index,blocks.length,blockMap,dataVars,vmap,1));
   out.push('}');
-
   return out.join('\n');
 }
 
-// ══════════════════════════════════════════════════════════════
-//  VARIABLE DETECTION
-// ══════════════════════════════════════════════════════════════
-function collectVars(blocks, dataVars) {
-  const regs = new Set();
-  for (const b of blocks) {
-    for (const instr of b.instrs) {
-      for (const arg of instr.args || []) {
-        const lo = arg.toLowerCase().replace(/^(qword|dword|word|byte)\s*(ptr\s*)?\[|\]$/gi, '');
-        const n = normReg(lo.trim());
-        if (REGS64.includes(n) && n !== 'rbp' && n !== 'rsp') regs.add(n);
-      }
-    }
-  }
-  return { regs: [...regs], dataKeys: Object.keys(dataVars) };
-}
-
-// ══════════════════════════════════════════════════════════════
-//  UI
-// ══════════════════════════════════════════════════════════════
+// ─── UI ──────────────────────────────────────────────────────────────────────
 function runDecompile() {
-  const src = document.getElementById('asmInput').value;
-  document.getElementById('errMsg').textContent = '';
-  if (!src.trim()) return;
-
+  const src=document.getElementById('asmInput').value;
+  document.getElementById('errMsg1').textContent='';
+  if(!src.trim()) return;
   try {
-    const { dataVars, instructions } = parseASM(src);
-    const { blocks, blockMap } = buildBlocks(instructions);
-    lastParsed = { dataVars, blocks, blockMap };
+    const {dataVars,instructions}=parseASM(src);
+    const {blocks,blockMap}=buildBlocks(instructions);
+    lastParsed={dataVars,blocks,blockMap};
 
-    const code = emitC(dataVars, blocks, blockMap, varMap);
-    renderOutput(code);
-    buildRenameUI(dataVars, blocks);
-  } catch (e) {
-    document.getElementById('errMsg').textContent = 'Eroare: ' + e.message;
+    const regs=collectRegs(blocks);
+    autoNames=buildAutoNames(regs,dataVars);
+
+    // Merge: auto names, but user overrides take priority
+    varMap={...autoNames,...userOverrides};
+
+    renderDecompiled(emitC(dataVars,blocks,blockMap,varMap));
+    buildRenameUI(regs,dataVars);
+  } catch(e) {
+    document.getElementById('errMsg1').textContent='Eroare: '+e.message;
     console.error(e);
   }
 }
 
 function rerender() {
-  if (!lastParsed) return;
-  const { dataVars, blocks, blockMap } = lastParsed;
-  try {
-    const code = emitC(dataVars, blocks, blockMap, varMap);
-    renderOutput(code);
-  } catch (e) { console.error(e); }
+  if(!lastParsed) return;
+  const {dataVars,blocks,blockMap}=lastParsed;
+  varMap={...autoNames,...userOverrides};
+  renderDecompiled(emitC(dataVars,blocks,blockMap,varMap));
 }
 
-function renderOutput(code) {
-  document.getElementById('cOutput').innerHTML = highlightC(code);
+function renderDecompiled(code) {
+  document.getElementById('cOutput').innerHTML=highlightC(code);
 }
 
-function buildRenameUI(dataVars, blocks) {
-  const { regs, dataKeys } = collectVars(blocks, dataVars);
-  const grid = document.getElementById('renameGrid');
-  grid.innerHTML = '';
+function buildRenameUI(regs,dataVars) {
+  const grid=document.getElementById('renameGrid');
+  grid.innerHTML='';
 
-  const addItem = (key, badge) => {
-    const item = document.createElement('div');
-    item.className = 'rename-item';
-    item.innerHTML = `
-      <span class="rename-orig">${key}</span>
-      <span class="rename-arrow">→</span>
-      <input class="rename-input" type="text" placeholder="${key}" data-key="${key}" value="${varMap[key] || ''}">
-      <span class="rename-badge">${badge}</span>
+  const add=(key,badge)=>{
+    const autoN=autoNames[key]||key;
+    const curVal=userOverrides[key]||'';
+    const item=document.createElement('div');
+    item.className='rename-item';
+    item.innerHTML=`
+      <span class="rename-orig" title="registru original">${key}</span>
+      <span style="color:#555;font-size:0.7rem">→</span>
+      <span class="rename-cur">${autoN}</span>
+      <span style="color:#555;font-size:0.7rem">→</span>
+      <input class="rename-input" type="text" placeholder="${autoN}" data-key="${key}" value="${curVal}">
+      <span class="badge">${badge}</span>
     `;
     grid.appendChild(item);
-    item.querySelector('input').addEventListener('input', function() {
-      const v = this.value.trim();
-      if (v) varMap[this.dataset.key] = v;
-      else delete varMap[this.dataset.key];
+    item.querySelector('input').addEventListener('input',function(){
+      const v=this.value.trim();
+      if(v) userOverrides[this.dataset.key]=v; else delete userOverrides[this.dataset.key];
       rerender();
     });
   };
 
-  for (const r of regs)     addItem(r, 'reg');
-  for (const k of dataKeys) addItem(k, 'data');
+  for(const r of regs)              add(r,'reg');
+  for(const k of Object.keys(dataVars)) add(k,'data');
 }
 
-function copyOutput() {
-  const text = document.getElementById('cOutput').innerText;
-  navigator.clipboard.writeText(text).catch(() => {});
+// ══════════════════════════════════════════════════════════════════════════════
+//  TOOL 2 — C → ASM  (compiler)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ─── Tokenizer ───────────────────────────────────────────────────────────────
+const TK = {
+  NUM:'NUM',STR:'STR',IDENT:'IDENT',EOF:'EOF',
+  PLUS:'+',MINUS:'-',STAR:'*',SLASH:'/',PERCENT:'%',
+  AMP:'&',PIPE:'|',CARET:'^',TILDE:'~',
+  LSHIFT:'<<',RSHIFT:'>>',
+  EQ:'==',NEQ:'!=',LT:'<',GT:'>',LTE:'<=',GTE:'>=',
+  AND:'&&',OR:'||',NOT:'!',
+  ASSIGN:'=',PLUSEQ:'+=',MINUSEQ:'-=',STAREQ:'*=',SLASHEQ:'/=',
+  AMPEQ:'&=',PIPEEQ:'|=',CARETEQ:'^=',LSHIFTEQ:'<<=',RSHIFTEQ:'>>=',
+  INC:'++',DEC:'--',
+  LPAREN:'(',RPAREN:')',LBRACE:'{',RBRACE:'}',SEMI:';',COMMA:',',
+  KW_IF:'if',KW_ELSE:'else',KW_WHILE:'while',KW_DO:'do',KW_FOR:'for',
+  KW_RETURN:'return',KW_LONG:'long',KW_INT:'int',KW_CHAR:'char',
+  KW_VOID:'void',KW_CONST:'const',KW_UNSIGNED:'unsigned',
+};
+
+const KEYWORDS=new Set(['if','else','while','do','for','return','long','int','char','void','const','unsigned']);
+
+function tokenize(src) {
+  const tokens=[]; let i=0;
+  while(i<src.length){
+    // whitespace
+    if(/\s/.test(src[i])){ i++; continue; }
+    // line comment
+    if(src[i]==='/'&&src[i+1]==='/'){while(i<src.length&&src[i]!=='\n')i++;continue;}
+    // block comment
+    if(src[i]==='/'&&src[i+1]==='*'){i+=2;while(i<src.length&&!(src[i]==='*'&&src[i+1]==='/'))i++;i+=2;continue;}
+    // string
+    if(src[i]==='"'){
+      let s='',j=i+1;
+      while(j<src.length&&src[j]!=='"'){
+        if(src[j]==='\\'&&j+1<src.length){s+=src[j]+src[j+1];j+=2;}
+        else{s+=src[j];j++;}
+      }
+      tokens.push({type:TK.STR,val:s});i=j+1;continue;
+    }
+    // number
+    if(/\d/.test(src[i])){
+      let n='';
+      if(src[i]==='0'&&src[i+1]==='x'){n='0x';i+=2;while(i<src.length&&/[0-9a-fA-F]/.test(src[i]))n+=src[i++];}
+      else{while(i<src.length&&/\d/.test(src[i]))n+=src[i++];}
+      tokens.push({type:TK.NUM,val:n});continue;
+    }
+    // ident / keyword
+    if(/[a-zA-Z_]/.test(src[i])){
+      let n=''; while(i<src.length&&/\w/.test(src[i]))n+=src[i++];
+      tokens.push({type:KEYWORDS.has(n)?n:TK.IDENT,val:n});continue;
+    }
+    // operators (longest match)
+    const two=src.slice(i,i+3);
+    if(two==='<<='){tokens.push({type:TK.LSHIFTEQ});i+=3;continue;}
+    if(two==='>>='){tokens.push({type:TK.RSHIFTEQ});i+=3;continue;}
+    const t2=src.slice(i,i+2);
+    const op2={
+      '==':TK.EQ,'!=':TK.NEQ,'<=':TK.LTE,'>=':TK.GTE,'<<':TK.LSHIFT,'>>':TK.RSHIFT,
+      '&&':TK.AND,'||':TK.OR,'++':TK.INC,'--':TK.DEC,
+      '+=':TK.PLUSEQ,'-=':TK.MINUSEQ,'*=':TK.STAREQ,'/=':TK.SLASHEQ,
+      '&=':TK.AMPEQ,'|=':TK.PIPEEQ,'^=':TK.CARETEQ,
+    };
+    if(op2[t2]){tokens.push({type:op2[t2]});i+=2;continue;}
+    const op1={
+      '+':TK.PLUS,'-':TK.MINUS,'*':TK.STAR,'/':TK.SLASH,'%':TK.PERCENT,
+      '&':TK.AMP,'|':TK.PIPE,'^':TK.CARET,'~':TK.TILDE,'!':TK.NOT,
+      '<':TK.LT,'>':TK.GT,'=':TK.ASSIGN,
+      '(':TK.LPAREN,')':TK.RPAREN,'{':TK.LBRACE,'}':TK.RBRACE,
+      ';':TK.SEMI,',':TK.COMMA,
+    };
+    if(op1[src[i]]){tokens.push({type:op1[src[i]]});i++;continue;}
+    i++; // skip unknown
+  }
+  tokens.push({type:TK.EOF});
+  return tokens;
 }
 
-// ══════════════════════════════════════════════════════════════
+// ─── Parser ───────────────────────────────────────────────────────────────────
+function parseC(tokens) {
+  let pos=0;
+  const peek=()=>tokens[pos];
+  const eat=(t)=>{ const tk=tokens[pos]; if(tk.type!==t) throw new Error(`Expected ${t}, got ${tk.type} '${tk.val||''}'`); pos++; return tk; };
+  const maybe=(t)=>{ if(tokens[pos].type===t){pos++;return true;} return false; };
+  const peekIs=(...ts)=>ts.includes(tokens[pos].type);
+
+  function parseType(){
+    // const? (long|int|char|void|unsigned)+ (char*)
+    let base='';
+    if(peekIs('const')){pos++;base+='const ';}
+    if(peekIs('unsigned')){pos++;base+='unsigned ';}
+    if(peekIs('long','int','char','void')){base+=peek().val;pos++;}
+    if(peekIs(TK.STAR)){pos++;return base.trim()+'*';}
+    return base.trim();
+  }
+
+  function isTypeStart(){
+    return peekIs('long','int','char','void','const','unsigned');
+  }
+
+  function parseBlock(){
+    eat(TK.LBRACE);
+    const stmts=[];
+    while(!peekIs(TK.RBRACE,TK.EOF)) stmts.push(parseStmt());
+    eat(TK.RBRACE);
+    return {type:'block',stmts};
+  }
+
+  function parseStmt(){
+    if(isTypeStart()){
+      const ty=parseType();
+      const name=eat(TK.IDENT).val;
+      let init=null;
+      if(maybe(TK.ASSIGN)) init=parseExpr();
+      eat(TK.SEMI);
+      return {type:'decl',ty,name,init};
+    }
+    if(peekIs(TK.KW_IF)){
+      pos++;eat(TK.LPAREN);const cond=parseExpr();eat(TK.RPAREN);
+      const then=parseBlock();
+      let els=null;
+      if(peekIs(TK.KW_ELSE)){pos++;els=parseBlock();}
+      return {type:'if',cond,then,els};
+    }
+    if(peekIs(TK.KW_WHILE)){
+      pos++;eat(TK.LPAREN);const cond=parseExpr();eat(TK.RPAREN);
+      return {type:'while',cond,body:parseBlock()};
+    }
+    if(peekIs(TK.KW_DO)){
+      pos++;const body=parseBlock();
+      eat(TK.KW_WHILE);eat(TK.LPAREN);const cond=parseExpr();eat(TK.RPAREN);eat(TK.SEMI);
+      return {type:'dowhile',body,cond};
+    }
+    if(peekIs(TK.KW_FOR)){
+      pos++;eat(TK.LPAREN);
+      let init=null;
+      if(!peekIs(TK.SEMI)){
+        if(isTypeStart()){const ty=parseType();const name=eat(TK.IDENT).val;let iv=null;if(maybe(TK.ASSIGN))iv=parseExpr();init={type:'decl',ty,name,init:iv};}
+        else init={type:'expr',expr:parseExpr()};
+      }
+      eat(TK.SEMI);
+      const cond=peekIs(TK.SEMI)?null:parseExpr();eat(TK.SEMI);
+      const update=peekIs(TK.RPAREN)?null:parseExpr();eat(TK.RPAREN);
+      return {type:'for',init,cond,update,body:parseBlock()};
+    }
+    if(peekIs(TK.KW_RETURN)){
+      pos++;const expr=peekIs(TK.SEMI)?null:parseExpr();eat(TK.SEMI);
+      return {type:'return',expr};
+    }
+    const expr=parseExpr();eat(TK.SEMI);
+    return {type:'expr',expr};
+  }
+
+  function parseExpr(){ return parseAssign(); }
+
+  function parseAssign(){
+    const left=parseOr();
+    const ASGN={[TK.ASSIGN]:'=',[TK.PLUSEQ]:'+=',[TK.MINUSEQ]:'-=',[TK.STAREQ]:'*=',[TK.SLASHEQ]:'/=',
+      [TK.AMPEQ]:'&=',[TK.PIPEEQ]:'|=',[TK.CARETEQ]:'^=',[TK.LSHIFTEQ]:'<<=',[TK.RSHIFTEQ]:'>>='};
+    if(ASGN[peek().type]){const op=ASGN[peek().type];pos++;const right=parseOr();return{type:'assign',op,left,right};}
+    return left;
+  }
+
+  function parseBin(next,...ops){
+    let l=next();
+    while(ops.includes(peek().type)){const op=peek().type;pos++;const r=next();l={type:'bin',op,left:l,right:r};}
+    return l;
+  }
+
+  function parseOr()  { return parseBin(parseAnd,TK.OR); }
+  function parseAnd() { return parseBin(parseEq,TK.AND); }
+  function parseEq()  { return parseBin(parseRel,TK.EQ,TK.NEQ); }
+  function parseRel() { return parseBin(parseShift,TK.LT,TK.GT,TK.LTE,TK.GTE); }
+  function parseShift(){ return parseBin(parseAdd,TK.LSHIFT,TK.RSHIFT); }
+  function parseAdd() { return parseBin(parseMul,TK.PLUS,TK.MINUS); }
+  function parseMul() { return parseBin(parseUnary,TK.STAR,TK.SLASH,TK.PERCENT); }
+
+  function parseUnary(){
+    if(peekIs(TK.MINUS)){pos++;return{type:'unary',op:'-',operand:parseUnary()};}
+    if(peekIs(TK.NOT))  {pos++;return{type:'unary',op:'!',operand:parseUnary()};}
+    if(peekIs(TK.TILDE)){pos++;return{type:'unary',op:'~',operand:parseUnary()};}
+    return parsePostfix();
+  }
+
+  function parsePostfix(){
+    let e=parsePrimary();
+    if(peekIs(TK.INC)){pos++;return{type:'post',op:'++',operand:e};}
+    if(peekIs(TK.DEC)){pos++;return{type:'post',op:'--',operand:e};}
+    return e;
+  }
+
+  function parsePrimary(){
+    if(peekIs(TK.NUM)) { const v=peek().val;pos++;return{type:'num',val:v}; }
+    if(peekIs(TK.STR)) { const v=peek().val;pos++;return{type:'str',val:v}; }
+    if(peekIs(TK.IDENT)){
+      const name=peek().val;pos++;
+      if(peekIs(TK.LPAREN)){ // function call
+        eat(TK.LPAREN);const args=[];
+        if(!peekIs(TK.RPAREN)){args.push(parseExpr());while(maybe(TK.COMMA))args.push(parseExpr());}
+        eat(TK.RPAREN);return{type:'call',name,args};
+      }
+      if(peekIs(TK.INC)){pos++;return{type:'pre',op:'++',name};} // prefix after ident read? unlikely but handle
+      return{type:'ident',name};
+    }
+    if(peekIs(TK.LPAREN)){pos++;const e=parseExpr();eat(TK.RPAREN);return e;}
+    throw new Error(`Unexpected token: ${peek().type} '${peek().val||''}'`);
+  }
+
+  // Parse top-level: skip to main
+  function parseProgram(){
+    const globals=[],fns=[];
+    while(!peekIs(TK.EOF)){
+      if(isTypeStart()){
+        const ty=parseType();
+        const name=eat(TK.IDENT).val;
+        if(peekIs(TK.LPAREN)){
+          eat(TK.LPAREN);
+          // skip params
+          while(!peekIs(TK.RPAREN,TK.EOF)) pos++;
+          eat(TK.RPAREN);
+          const body=parseBlock();
+          fns.push({name,body});
+        } else {
+          let init=null;if(maybe(TK.ASSIGN))init=parseExpr();eat(TK.SEMI);
+          globals.push({ty,name,init});
+        }
+      } else { pos++; }
+    }
+    return {globals,fns};
+  }
+
+  return parseProgram();
+}
+
+// ─── Code generator ──────────────────────────────────────────────────────────
+class CGen {
+  constructor(){
+    this.out=[];       // ASM lines
+    this.data=[];      // .data entries
+    this.syms={};      // name → offset (negative, rbp-relative)
+    this.stackSz=0;
+    this.lblCnt=0;
+    this.strCnt=0;
+  }
+  lbl(p){ return `${p}_${this.lblCnt++}`; }
+  strLbl(){ return `__str_${this.strCnt++}`; }
+  emit(s){ this.out.push(s); }
+  alloc(name){
+    this.stackSz+=8;
+    this.syms[name]=-this.stackSz;
+    return -this.stackSz;
+  }
+  loc(name){
+    const o=this.syms[name];
+    if(o===undefined) throw new Error(`Undefined variable: ${name}`);
+    return o>0?`[rbp + ${o}]`:`[rbp - ${-o}]`;
+  }
+  // Evaluate expr into rax
+  evalExpr(node){
+    if(!node) return;
+    switch(node.type){
+      case 'num': this.emit(`    mov rax, ${node.val}`); break;
+      case 'str': {
+        const lbl=this.strLbl();
+        this.data.push(`    ${lbl}: db "${node.val}", 0`);
+        this.emit(`    lea rax, [rel ${lbl}]`); break;
+      }
+      case 'ident': this.emit(`    mov rax, ${this.loc(node.name)}`); break;
+      case 'assign': {
+        this.evalExpr(node.right);
+        if(node.op==='='){
+          if(node.left.type==='ident') this.emit(`    mov ${this.loc(node.left.name)}, rax`);
+        } else {
+          const lhs=this.loc(node.left.name);
+          const opMap={'+=':'add','−=':'sub','-=':'sub','*=':'imul','&=':'and','|=':'or','^=':'xor','<<=':'shl','>>=':'shr'};
+          const aop=opMap[node.op]||'add';
+          this.emit(`    ${aop} ${lhs}, rax`);
+          this.emit(`    mov rax, ${lhs}`);
+        }
+        break;
+      }
+      case 'bin': {
+        this.evalExpr(node.right);
+        this.emit(`    mov rcx, rax`);
+        this.evalExpr(node.left);
+        const op=node.op;
+        if(op===TK.PLUS)  this.emit(`    add rax, rcx`);
+        else if(op===TK.MINUS) this.emit(`    sub rax, rcx`);
+        else if(op===TK.STAR)  this.emit(`    imul rax, rcx`);
+        else if(op===TK.SLASH) { this.emit(`    cqo`);this.emit(`    idiv rcx`); }
+        else if(op===TK.PERCENT){ this.emit(`    cqo`);this.emit(`    idiv rcx`);this.emit(`    mov rax, rdx`);}
+        else if(op===TK.AMP)   this.emit(`    and rax, rcx`);
+        else if(op===TK.PIPE)  this.emit(`    or rax, rcx`);
+        else if(op===TK.CARET) this.emit(`    xor rax, rcx`);
+        else if(op===TK.LSHIFT)this.emit(`    shl rax, cl`);
+        else if(op===TK.RSHIFT)this.emit(`    sar rax, cl`);
+        else if([TK.EQ,TK.NEQ,TK.LT,TK.GT,TK.LTE,TK.GTE].includes(op)){
+          this.emit(`    cmp rax, rcx`);
+          const smap={[TK.EQ]:'sete',[TK.NEQ]:'setne',[TK.LT]:'setl',[TK.GT]:'setg',[TK.LTE]:'setle',[TK.GTE]:'setge'};
+          this.emit(`    ${smap[op]} al`);
+          this.emit(`    movzx rax, al`);
+        }
+        else if(op===TK.AND||op===TK.OR){
+          this.emit(`    and rax, rcx`); // simplification
+        }
+        break;
+      }
+      case 'unary': {
+        this.evalExpr(node.operand);
+        if(node.op==='-') this.emit(`    neg rax`);
+        else if(node.op==='~') this.emit(`    not rax`);
+        else if(node.op==='!') { this.emit(`    test rax, rax`);this.emit(`    sete al`);this.emit(`    movzx rax, al`); }
+        break;
+      }
+      case 'post': {
+        const lhs=this.loc(node.operand.name);
+        this.emit(`    mov rax, ${lhs}`);
+        if(node.op==='++') this.emit(`    inc QWORD ${lhs}`);
+        else               this.emit(`    dec QWORD ${lhs}`);
+        break;
+      }
+      case 'call': this.emitCall(node); break;
+    }
+  }
+
+  // Emit condition: compare, jump to falseLabel if false
+  emitCond(node, falseLabel){
+    const REVCOND={[TK.EQ]:'jne',[TK.NEQ]:'je',[TK.LT]:'jge',[TK.GT]:'jle',[TK.LTE]:'jg',[TK.GTE]:'jl'};
+    if(node.type==='bin'&&REVCOND[node.op]){
+      this.evalExpr(node.right);
+      this.emit(`    mov rcx, rax`);
+      this.evalExpr(node.left);
+      this.emit(`    cmp rax, rcx`);
+      this.emit(`    ${REVCOND[node.op]} ${falseLabel}`);
+    } else {
+      this.evalExpr(node);
+      this.emit(`    test rax, rax`);
+      this.emit(`    jz ${falseLabel}`);
+    }
+  }
+
+  emitCall(node){
+    if(node.name==='printf'){
+      // Linux x64: rdi=fmt, rsi,rdx,rcx,r8,r9=args
+      const argRegs=['rsi','rdx','rcx','r8','r9'];
+      // Evaluate args in reverse, push, then pop
+      const allArgs=node.args;
+      // Evaluate each arg into rax, then store on a temp slot
+      const temps=[];
+      for(const a of allArgs){
+        this.evalExpr(a);
+        const slot=this.alloc(`__tmp_${this.lblCnt++}`);
+        this.emit(`    mov ${this.loc(Object.keys(this.syms).at(-1))}, rax`);
+        temps.push(Object.keys(this.syms).at(-1));
+      }
+      // Load into registers
+      for(let i=allArgs.length-1;i>=0;i--){
+        const reg=i===0?'rdi':argRegs[i-1]||null;
+        if(reg) this.emit(`    mov ${reg}, ${this.loc(temps[i])}`);
+      }
+      this.emit(`    xor eax, eax`);
+      this.emit(`    call printf`);
+      return;
+    }
+    // generic call
+    this.emit(`    call ${node.name}`);
+  }
+
+  emitStmt(node){
+    switch(node.type){
+      case 'decl': {
+        const off=this.alloc(node.name);
+        if(node.init){ this.evalExpr(node.init); this.emit(`    mov ${this.loc(node.name)}, rax`); }
+        else          { this.emit(`    mov QWORD ${this.loc(node.name)}, 0`); }
+        break;
+      }
+      case 'expr': this.evalExpr(node.expr); break;
+      case 'if': {
+        const end=this.lbl('.if_end');
+        if(node.els){
+          const els=this.lbl('.if_else');
+          this.emitCond(node.cond,els);
+          this.emitBlock(node.then);
+          this.emit(`    jmp ${end}`);
+          this.emit(`${els}:`);
+          this.emitBlock(node.els);
+        } else {
+          this.emitCond(node.cond,end);
+          this.emitBlock(node.then);
+        }
+        this.emit(`${end}:`);
+        break;
+      }
+      case 'while': {
+        const top=this.lbl('.wh_top'), end=this.lbl('.wh_end');
+        this.emit(`${top}:`);
+        this.emitCond(node.cond,end);
+        this.emitBlock(node.body);
+        this.emit(`    jmp ${top}`);
+        this.emit(`${end}:`);
+        break;
+      }
+      case 'dowhile': {
+        const top=this.lbl('.do_top');
+        this.emit(`${top}:`);
+        this.emitBlock(node.body);
+        // Emit condition → jump back if true
+        const FWDCOND={[TK.EQ]:'je',[TK.NEQ]:'jne',[TK.LT]:'jl',[TK.GT]:'jg',[TK.LTE]:'jle',[TK.GTE]:'jge'};
+        const nd=node.cond;
+        if(nd.type==='bin'&&FWDCOND[nd.op]){
+          this.evalExpr(nd.right);this.emit(`    mov rcx, rax`);
+          this.evalExpr(nd.left);this.emit(`    cmp rax, rcx`);
+          this.emit(`    ${FWDCOND[nd.op]} ${top}`);
+        } else {
+          this.evalExpr(node.cond);this.emit(`    test rax, rax`);this.emit(`    jnz ${top}`);
+        }
+        break;
+      }
+      case 'for': {
+        if(node.init) this.emitStmt(node.init);
+        const top=this.lbl('.for_top'),end=this.lbl('.for_end');
+        this.emit(`${top}:`);
+        if(node.cond){this.emitCond(node.cond,end);}
+        this.emitBlock(node.body);
+        if(node.update){this.evalExpr(node.update);}
+        this.emit(`    jmp ${top}`);
+        this.emit(`${end}:`);
+        break;
+      }
+      case 'return': {
+        if(node.expr) this.evalExpr(node.expr);
+        else this.emit(`    xor eax, eax`);
+        this.emit(`    leave`);
+        this.emit(`    ret`);
+        break;
+      }
+      case 'block': this.emitBlock(node); break;
+    }
+  }
+
+  emitBlock(node){ for(const s of node.stmts) this.emitStmt(s); }
+
+  compile(ast){
+    // .data
+    const dataLines=[];
+    for(const g of ast.globals){
+      if(g.init&&g.init.type==='str')
+        dataLines.push(`    ${g.name}: db "${g.init.val}", 0`);
+      else if(g.init)
+        dataLines.push(`    ${g.name}: dq ${g.init.val}`);
+    }
+
+    // Generate main body first (to know stack size)
+    const mainFn=ast.fns.find(f=>f.name==='main')||ast.fns[0];
+    if(!mainFn) return '; No main function found';
+    this.emitBlock(mainFn.body);
+
+    // Align stack to 16 bytes
+    const aligned=Math.ceil(this.stackSz/16)*16||0;
+
+    // Assemble output
+    const lines=[];
+    lines.push('; Generated by ASM↔C Tools');
+    lines.push('');
+    if(dataLines.length||this.data.length){
+      lines.push('section .data');
+      lines.push(...dataLines);
+      lines.push(...this.data);
+      lines.push('');
+    }
+    lines.push('section .text');
+    lines.push('    global main');
+    lines.push('    extern printf');
+    lines.push('');
+    lines.push('main:');
+    lines.push('    push rbp');
+    lines.push('    mov rbp, rsp');
+    if(aligned) lines.push(`    sub rsp, ${aligned}`);
+    lines.push(...this.out);
+    // If no explicit return, add one
+    if(!this.out.some(l=>l.trim()==='ret')){
+      lines.push('    xor eax, eax');
+      lines.push('    leave');
+      lines.push('    ret');
+    }
+    return lines.join('\n');
+  }
+}
+
+function runCompile(){
+  const src=document.getElementById('cInput').value;
+  document.getElementById('errMsg2').textContent='';
+  if(!src.trim()) return;
+  try {
+    const tokens=tokenize(src);
+    const ast=parseC(tokens);
+    const gen=new CGen();
+    const asm=gen.compile(ast);
+    document.getElementById('asmOutput').innerHTML=highlightASM(asm);
+  } catch(e){
+    document.getElementById('errMsg2').textContent='Eroare: '+e.message;
+    console.error(e);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 //  SYNTAX HIGHLIGHTING
-// ══════════════════════════════════════════════════════════════
-function highlightC(code) {
-  const KW = /\b(int|long|char|void|return|if|else|do|while|for|const|struct|unsigned|static)\b/g;
-  const FN = /\b(printf|scanf|malloc|free|memcpy|strlen)\b/g;
+// ══════════════════════════════════════════════════════════════════════════════
+function highlightC(code){
+  const KW=/\b(int|long|char|void|return|if|else|do|while|for|const|struct|unsigned|static)\b/g;
+  const FN=/\b(printf|scanf|malloc|free|memcpy|strlen|memset)\b/g;
+  let h=code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  h=h.replace(/"((?:[^"\\]|\\.)*)"/g,'<span class="str">"$1"</span>');
+  h=h.replace(/(\/\/[^\n]*|\/\*[\s\S]*?\*\/)/g,'<span class="cmt">$1</span>');
+  h=h.replace(/\b(-?(?:0x[0-9a-fA-F]+|\d+))\b/g,'<span class="num">$1</span>');
+  h=h.replace(FN,'<span class="fn">$1</span>');
+  h=h.replace(KW,'<span class="kw">$1</span>');
+  return h;
+}
 
-  let html = code
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-
-  // strings
-  html = html.replace(/"((?:[^"\\]|\\.)*)"/g, '<span class="str">"$1"</span>');
-  // comments
-  html = html.replace(/(\/\/[^\n]*|\/\*[\s\S]*?\*\/)/g, '<span class="cmt">$1</span>');
-  // numbers (not inside strings/comments already replaced)
-  html = html.replace(/\b(-?(?:0x[0-9a-fA-F]+|\d+))\b/g, '<span class="num">$1</span>');
-  // functions
-  html = html.replace(FN, '<span class="fn">$1</span>');
-  // keywords
-  html = html.replace(KW, '<span class="kw">$1</span>');
-
-  return html;
+function highlightASM(code){
+  const KW=/\b(mov|add|sub|imul|idiv|cmp|test|jmp|je|jne|jg|jl|jge|jle|ja|jb|jae|jbe|jz|jnz|js|jns|push|pop|call|ret|leave|xor|and|or|not|neg|inc|dec|shl|shr|sar|sal|lea|cqo|cdq|setl|setg|setle|setge|sete|setne|movzx|QWORD|DWORD|WORD|BYTE)\b/g;
+  const SEC=/\b(section|global|extern)\b/g;
+  const REG=/\b(rax|rbx|rcx|rdx|rsi|rdi|r8|r9|r10|r11|r12|r13|r14|r15|rbp|rsp|eax|ecx|edx|al|cl|rel)\b/g;
+  let h=code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  h=h.replace(/("(?:[^"\\]|\\.)*")/g,'<span class="str">$1</span>');
+  h=h.replace(/(;[^\n]*)/g,'<span class="cmt">$1</span>');
+  h=h.replace(/\b(0x[0-9a-fA-F]+|\d+)\b/g,'<span class="num">$1</span>');
+  h=h.replace(SEC,'<span class="ty">$1</span>');
+  h=h.replace(KW,'<span class="kw">$1</span>');
+  h=h.replace(REG,'<span class="fn">$1</span>');
+  h=h.replace(/^(\s*\.[a-zA-Z_]\w*:)/gm,'<span class="lbl">$1</span>');
+  h=h.replace(/^([a-zA-Z_]\w*:)/gm,'<span class="lbl">$1</span>');
+  return h;
 }
 </script>
 </body>
