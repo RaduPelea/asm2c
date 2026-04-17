@@ -480,10 +480,10 @@ function instrToC(instr,dataVars,vmap) {
       return {line:`${dst} ^= ${src};`,cmpSt};
     case 'shl': case 'sal': return {line:`${dst} <<= ${src};`,cmpSt};
     case 'shr': case 'sar': return {line:`${dst} >>= ${src};`,cmpSt};
-    case 'xchg': return {line:`{ long _tmp = ${dst}; ${dst} = ${src}; ${src} = _tmp; }`,cmpSt};
+    case 'xchg': return {line:`_tmp = ${dst}; ${dst} = ${src}; ${src} = _tmp;`,cmpSt};
     case 'cmp':  cmpSt={left:dst,right:src}; return {line:null,cmpSt};
     case 'test': cmpSt={left:dst,right:src}; return {line:null,cmpSt};
-    case 'ret':  return {line:`return ${vmr('rax',vmap)};`,cmpSt};
+    case 'ret':  return {line:`return ${vmr('rax',vmap) !== 'rax' ? vmr('rax',vmap) : '0'};`,cmpSt};
     case 'call': return {line:`${args[0]}();`,cmpSt};
     case 'push': case 'pop': case 'nop': case 'cdq': case 'cqo': return {line:null,cmpSt};
     default: return {line:`/* ${op} ${args.join(', ')} */`,cmpSt};
@@ -504,10 +504,16 @@ function resolveArg(arg,dataVars,vmap) {
 
 function resolveMemRef(inner,dataVars,vmap) {
   if(dataVars[inner]) return vmr(inner,vmap);
-  if(isReg(inner.toLowerCase())) return `*${vmr(normReg(inner.toLowerCase()),vmap)}`;
-  const am=inner.match(/^(\w+)\s*([+-])\s*(\w+)$/);
-  if(am){ const b=resolveArg(am[1],dataVars,vmap),o=resolveArg(am[3],dataVars,vmap); return `*(${b} ${am[2]} ${o})`; }
-  return `mem[${inner}]`;
+  const lo=inner.toLowerCase().trim();
+  if(isReg(lo)) return `*(long*)${vmr(normReg(lo),vmap)}`;
+  // reg +/- offset or reg * scale +/- reg
+  const am=inner.match(/^(.+?)\s*([+-])\s*(.+)$/);
+  if(am){
+    const base=resolveArg(am[1].trim(),dataVars,vmap);
+    const off =resolveArg(am[3].trim(),dataVars,vmap);
+    return `*((long*)(${base}) ${am[2]} ${off})`;
+  }
+  return `*(long*)${resolveArg(inner,dataVars,vmap)}`;
 }
 
 function vmr(key,vmap) { if(!key) return key; return vmap[key]||vmap[key.toLowerCase()]||key; }
@@ -542,17 +548,23 @@ function emitC(dataVars,blocks,blockMap,vmap) {
   }
   if(out.length) out.push('');
 
-  // Detect entry block (first block with a real label = function name)
   const entryBlock = blocks[0];
   if(!entryBlock) return '// Nicio funcție găsită';
 
   const fnName = entryBlock.id && !entryBlock.id.startsWith('_b') ? entryBlock.id : 'func';
-
-  // Detect used ABI parameter registers → emit as parameters
   const paramRegs = detectParams(blocks);
   const params = paramRegs.map(r=>`long ${vmr(r,vmap)}`).join(', ');
   const retType = fnName==='main' ? 'int' : 'void';
   out.push(`${retType} ${vmr(fnName,vmap)}(${params}) {`);
+
+  // Declare all non-param register locals at top of function
+  const allRegs = collectRegs(blocks);
+  const localRegs = allRegs.filter(r => !paramRegs.includes(r));
+  for (const r of localRegs) out.push(`    long ${vmr(r,vmap)};`);
+  // If any xchg is used, pre-declare _tmp
+  const hasXchg = blocks.some(b=>b.instrs.some(i=>i.op==='xchg'));
+  if (hasXchg) out.push(`    long _tmp;`);
+  if (localRegs.length || hasXchg) out.push('');
 
   out.push(...structureRange(blocks,entryBlock.index,blocks.length,blockMap,dataVars,vmap,1,false));
   out.push('}');
