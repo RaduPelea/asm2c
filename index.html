@@ -284,18 +284,36 @@ const WRITE_OPS=new Set(['mov','lea','add','sub','imul','mul','idiv','inc','dec'
 // Instructions that READ their first arg
 const READ_OPS=new Set(['cmp','test','push','jmp']);
 
+// Extract all register names from an argument string (handles complex expressions)
+function extractRegs(arg) {
+  const regs=[];
+  arg.replace(/\b([a-zA-Z][a-zA-Z0-9]*)\b/g,(_,m)=>{
+    const lo=normReg(m.toLowerCase());
+    if(REGS64.includes(lo)) regs.push(lo);
+  });
+  return regs;
+}
+
 function detectParams(blocks) {
   const written=new Set(), readFirst=new Set();
   for(const b of blocks) for(const ins of b.instrs) {
     const op=ins.op;
     const args=ins.args||[];
-    // Check each arg: if it's an ABI reg and hasn't been written yet → read-first = param
     args.forEach((a,idx)=>{
-      const lo=normReg(a.toLowerCase().replace(/^(qword|dword|word|byte)\s*(ptr\s*)?\[|\]$/gi,'').trim());
-      if(!ABI_PARAMS.includes(lo)) return;
+      const isMem=/\[/.test(a);
       const isWrite=(idx===0 && WRITE_OPS.has(op));
-      if(isWrite){ written.add(lo); }
-      else if(!written.has(lo)){ readFirst.add(lo); }
+      if(isMem) {
+        // Memory operand: all registers inside are reads
+        for(const lo of extractRegs(a)) {
+          if(!ABI_PARAMS.includes(lo)) continue;
+          if(!written.has(lo)) readFirst.add(lo);
+        }
+      } else {
+        const lo=normReg(a.toLowerCase().trim());
+        if(!ABI_PARAMS.includes(lo)) return;
+        if(isWrite){ written.add(lo); }
+        else if(!written.has(lo)){ readFirst.add(lo); }
+      }
     });
   }
   return ABI_PARAMS.filter(r=>readFirst.has(r));
@@ -314,12 +332,12 @@ function structureRange(blocks,start,end,blockMap,dataVars,vmap,indent,inLoop) {
     if(backIdx!==-1) {
       const loopEnd=blocks[backIdx];
       const isInfinite=(loopEnd.jumpOp==='jmp'); // unconditional back → while(1)
-      const bodyLines=[]; let ic=null;
-      for(let j=i;j<=backIdx;j++){
-        // skip the last back-jump; pass inLoop=true so breaks work inside
-        const r=emitBlockInstrs(blocks[j],dataVars,vmap,indent+1,j===backIdx,blockMap,end,true);
-        ic=r.cmpSt||ic; bodyLines.push(...r.lines);
-      }
+      // Emit loop header block instructions (skip its terminal jump)
+      const hdr=emitBlockInstrs(block,dataVars,vmap,indent+1,true,blockMap,end,true);
+      const bodyLines=[...hdr.lines];
+      let ic=hdr.cmpSt;
+      // Recursively structure the loop body so inner if/else/break work
+      bodyLines.push(...structureRange(blocks,i+1,backIdx+1,blockMap,dataVars,vmap,indent+1,true));
       if(isInfinite){
         lines.push(`${pad}while (1) {`);
         lines.push(...bodyLines);
@@ -450,10 +468,25 @@ function emitBlockInstrs(block,dataVars,vmap,indent,skipLastJump,blockMap,rangeE
   return {lines,cmpSt};
 }
 
+// Replace all register/label names inside an arithmetic expression string
+function resolveExpr(expr,dataVars,vmap) {
+  return expr.replace(/\b([a-zA-Z_]\w*)\b/g,(m)=>{
+    const lo=m.toLowerCase();
+    if(isReg(lo)) return vmr(normReg(lo),vmap);
+    if(dataVars[m]) return vmr(m,vmap);
+    return m;
+  });
+}
+
+// Size prefix → C type
+const SIZE_TYPE={QWORD:'long',DWORD:'int',WORD:'short',BYTE:'char'};
+
 function instrToC(instr,dataVars,vmap) {
   const {op,args}=instr; let cmpSt=null;
   const dst=args[0]?resolveArg(args[0],dataVars,vmap):null;
   const src=args[1]?resolveArg(args[1],dataVars,vmap):null;
+  // Helper: wrap pointer-dereference for ++ / --
+  const deref=s=>(s&&s.startsWith('*')?`(${s})`:s);
 
   if(op==='PRINTF64'){
     let fmt=args[0].replace(/\\n/g,'\\n').replace(/\\x0*\d*/g,'');
@@ -462,14 +495,14 @@ function instrToC(instr,dataVars,vmap) {
   }
   switch(op){
     case 'mov':  return {line:dst&&src?`${dst} = ${src};`:null,cmpSt};
-    case 'lea':  return {line:`${dst} = &${src};`,cmpSt};
+    case 'lea':  return {line:`${dst} = (long)&(${src});`,cmpSt};
     case 'add':  return {line:`${dst} += ${src};`,cmpSt};
     case 'sub':  return {line:`${dst} -= ${src};`,cmpSt};
     case 'imul': if(args.length===3){const s2=resolveArg(args[2],dataVars,vmap);return{line:`${dst} = ${src} * ${s2};`,cmpSt};} return{line:`${dst} *= ${src};`,cmpSt};
-    case 'mul':  return {line:`rax *= ${dst};`,cmpSt};
-    case 'idiv': return {line:`rax /= ${dst};`,cmpSt};
-    case 'inc':  return {line:`${dst}++;`,cmpSt};
-    case 'dec':  return {line:`${dst}--;`,cmpSt};
+    case 'mul':  return {line:`${vmr('rax',vmap)} *= ${dst};`,cmpSt};
+    case 'idiv': return {line:`${vmr('rax',vmap)} /= ${dst};`,cmpSt};
+    case 'inc':  return {line:`${deref(dst)}++;`,cmpSt};
+    case 'dec':  return {line:`${deref(dst)}--;`,cmpSt};
     case 'neg':  return {line:`${dst} = -${dst};`,cmpSt};
     case 'not':  return {line:`${dst} = ~${dst};`,cmpSt};
     case 'and':  return {line:`${dst} &= ${src};`,cmpSt};
@@ -483,37 +516,38 @@ function instrToC(instr,dataVars,vmap) {
     case 'xchg': return {line:`_tmp = ${dst}; ${dst} = ${src}; ${src} = _tmp;`,cmpSt};
     case 'cmp':  cmpSt={left:dst,right:src}; return {line:null,cmpSt};
     case 'test': cmpSt={left:dst,right:src}; return {line:null,cmpSt};
-    case 'ret':  return {line:`return ${vmr('rax',vmap) !== 'rax' ? vmr('rax',vmap) : '0'};`,cmpSt};
+    case 'ret':  return {line: currentFnIsVoid ? 'return;' :
+                   `return ${vmr('rax',vmap)!=='rax'?vmr('rax',vmap):'0'};`, cmpSt};
     case 'call': return {line:`${args[0]}();`,cmpSt};
     case 'push': case 'pop': case 'nop': case 'cdq': case 'cqo': return {line:null,cmpSt};
-    default: return {line:`/* ${op} ${args.join(', ')} */`,cmpSt};
+    default: return {line:null,cmpSt}; // silently skip unknown
   }
 }
 
 function resolveArg(arg,dataVars,vmap) {
   if(!arg) return arg;
-  const sm=arg.match(/^(?:QWORD|DWORD|WORD|BYTE)\s+(?:PTR\s+)?\[(.+)\]$/i);
-  if(sm) return resolveMemRef(sm[1].trim(),dataVars,vmap);
+  // Sized memory: DWORD [expr] / BYTE [expr] etc.
+  const sm=arg.match(/^(QWORD|DWORD|WORD|BYTE)\s+(?:PTR\s+)?\[(.+)\]$/i);
+  if(sm) return resolveMemSized(sm[2].trim(), sm[1].toUpperCase(), dataVars, vmap);
+  // Unsized memory: [expr]
   const mm=arg.match(/^\[(.+)\]$/);
-  if(mm) return resolveMemRef(mm[1].trim(),dataVars,vmap);
+  if(mm) return resolveMemSized(mm[1].trim(), 'QWORD', dataVars, vmap);
   const lo=arg.toLowerCase();
   if(isReg(lo)) return vmr(normReg(lo),vmap);
   if(/^-?\d+$/.test(arg)||/^0x[0-9a-fA-F]+$/i.test(arg)) return arg;
   return vmr(arg,vmap);
 }
 
-function resolveMemRef(inner,dataVars,vmap) {
+function resolveMemSized(inner, size, dataVars, vmap) {
+  const ctype = SIZE_TYPE[size]||'long';
+  // Known data variable (scalar)
   if(dataVars[inner]) return vmr(inner,vmap);
   const lo=inner.toLowerCase().trim();
-  if(isReg(lo)) return `*(long*)${vmr(normReg(lo),vmap)}`;
-  // reg +/- offset or reg * scale +/- reg
-  const am=inner.match(/^(.+?)\s*([+-])\s*(.+)$/);
-  if(am){
-    const base=resolveArg(am[1].trim(),dataVars,vmap);
-    const off =resolveArg(am[3].trim(),dataVars,vmap);
-    return `*((long*)(${base}) ${am[2]} ${off})`;
-  }
-  return `*(long*)${resolveArg(inner,dataVars,vmap)}`;
+  // Plain register dereference
+  if(isReg(lo)) return `*(${ctype}*)${vmr(normReg(lo),vmap)}`;
+  // Complex expression: rename all registers/labels inside
+  const expr=resolveExpr(inner,dataVars,vmap);
+  return `*(${ctype}*)(${expr})`;
 }
 
 function vmr(key,vmap) { if(!key) return key; return vmap[key]||vmap[key.toLowerCase()]||key; }
@@ -538,15 +572,17 @@ function collectRegs(blocks) {
 }
 
 // ─── C emitter (top-level) ────────────────────────────────────────────────────
+let currentFnIsVoid = true;
+
 function emitC(dataVars,blocks,blockMap,vmap) {
-  const out=[];
+  const out=['#include <stdio.h>','#include <stdlib.h>',''];
 
   // Global data vars
   for(const [name,info] of Object.entries(dataVars)){
     const n=vmr(name,vmap);
     out.push(info.kind==='str'?`const char* ${n} = "${info.strVal}";`:`${info.type==='dq'?'long':'int'} ${n} = ${info.rawVal};`);
   }
-  if(out.length) out.push('');
+  if(Object.keys(dataVars).length) out.push('');
 
   const entryBlock = blocks[0];
   if(!entryBlock) return '// Nicio funcție găsită';
@@ -555,6 +591,7 @@ function emitC(dataVars,blocks,blockMap,vmap) {
   const paramRegs = detectParams(blocks);
   const params = paramRegs.map(r=>`long ${vmr(r,vmap)}`).join(', ');
   const retType = fnName==='main' ? 'int' : 'void';
+  currentFnIsVoid = (retType === 'void');
   out.push(`${retType} ${vmr(fnName,vmap)}(${params}) {`);
 
   // Declare all non-param register locals at top of function
