@@ -274,16 +274,31 @@ function reorderBlocksDFS(entry, allBlocks, blockMap) {
   return ordered;
 }
 
-// Detect Linux ABI input params: which of rdi/rsi/rdx/rcx/r8/r9 appear in the function
+// Detect Linux ABI input params: registers that are READ before being WRITTEN
+// (written-first = local variable, read-first = input parameter)
 const ABI_PARAMS=['rdi','rsi','rdx','rcx','r8','r9'];
+
+// Instructions that WRITE to their first arg
+const WRITE_OPS=new Set(['mov','lea','add','sub','imul','mul','idiv','inc','dec',
+  'neg','not','and','or','xor','shl','shr','sal','sar','pop','xchg']);
+// Instructions that READ their first arg
+const READ_OPS=new Set(['cmp','test','push','jmp']);
+
 function detectParams(blocks) {
-  const used=new Set();
-  for(const b of blocks) for(const ins of b.instrs)
-    for(const a of ins.args||[]) {
+  const written=new Set(), readFirst=new Set();
+  for(const b of blocks) for(const ins of b.instrs) {
+    const op=ins.op;
+    const args=ins.args||[];
+    // Check each arg: if it's an ABI reg and hasn't been written yet → read-first = param
+    args.forEach((a,idx)=>{
       const lo=normReg(a.toLowerCase().replace(/^(qword|dword|word|byte)\s*(ptr\s*)?\[|\]$/gi,'').trim());
-      if(ABI_PARAMS.includes(lo)) used.add(lo);
-    }
-  return ABI_PARAMS.filter(r=>used.has(r));
+      if(!ABI_PARAMS.includes(lo)) return;
+      const isWrite=(idx===0 && WRITE_OPS.has(op));
+      if(isWrite){ written.add(lo); }
+      else if(!written.has(lo)){ readFirst.add(lo); }
+    });
+  }
+  return ABI_PARAMS.filter(r=>readFirst.has(r));
 }
 
 // ─── Structurer ───────────────────────────────────────────────────────────────
